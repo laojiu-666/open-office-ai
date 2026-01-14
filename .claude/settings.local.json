@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ace-tool__enhance_prompt",
+      "mcp__ace-tool__search_context",
+      "Bash(npx:*)",
+      "Bash(npm install -g yo generator-office)",
+      "Bash(yo office:*)",
+      "Bash(npm init -y)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:dev)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run build:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(if not exist \"C:\\\\OfficeAddins\" mkdir \"C:\\\\OfficeAddins\")",
+      "Bash(copy:*)",
+      "Bash(cmd /c:*)",
+      "Bash(reg query:*)",
+      "Bash(reg add:*)",
+      "Bash(net share:*)"
+    ]
+  }
+}
