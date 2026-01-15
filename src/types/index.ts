@@ -125,4 +125,11 @@ export interface ChatMessage {
   timestamp: number;
   status: 'pending' | 'streaming' | 'completed' | 'error';
   context?: string;
+  slideSpec?: import('./slide-spec').SlideSpec; // 幻灯片生成规格
 }
+
+// Re-export SlideSpec types
+export * from './slide-spec';
+
+// Re-export Image generation types
+export * from '../core/image/types';

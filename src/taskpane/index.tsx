@@ -8,7 +8,7 @@ Office.onReady((info) => {
     if (container) {
       const root = createRoot(container);
       root.render(
-        <FluentProvider theme={webLightTheme}>
+        <FluentProvider theme={webLightTheme} style={{ height: '100%' }}>
           <App />
         </FluentProvider>
       );

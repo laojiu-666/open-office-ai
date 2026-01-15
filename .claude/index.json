@@ -1,0 +1,198 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-01-15T00:00:00.000Z",
+  "project": {
+    "name": "open-office-ai",
+    "description": "AI 驱动的 Office 文档编辑助手 - PowerPoint Add-in",
+    "repository": "https://github.com/laojiu-666/open-office-ai",
+    "language": "TypeScript",
+    "framework": ["React", "Office.js", "Fluent UI"]
+  },
+  "modules": [
+    {
+      "path": "src/taskpane",
+      "name": "taskpane",
+      "description": "Office Add-in 入口，初始化 React 应用",
+      "entry": "index.tsx",
+      "claudeMd": "src/taskpane/CLAUDE.md",
+      "files": ["index.tsx", "index.html", "App.tsx"],
+      "dependencies": ["react", "@fluentui/react-components", "office-js"],
+      "coverage": {
+        "scanned": true,
+        "filesScanned": 3,
+        "filesTotal": 3,
+        "percentage": 100
+      }
+    },
+    {
+      "path": "src/adapters/powerpoint",
+      "name": "powerpoint-adapter",
+      "description": "PowerPoint API 封装，文档操作适配",
+      "entry": "index.ts",
+      "claudeMd": "src/adapters/powerpoint/CLAUDE.md",
+      "files": ["index.ts", "context.ts", "slide-renderer.ts"],
+      "dependencies": ["office-js"],
+      "interfaces": ["IDocumentAdapter"],
+      "coverage": {
+        "scanned": true,
+        "filesScanned": 3,
+        "filesTotal": 3,
+        "percentage": 100
+      }
+    },
+    {
+      "path": "src/core/llm",
+      "name": "llm",
+      "description": "LLM 提供商抽象，支持 OpenAI/Anthropic",
+      "entry": "factory.ts",
+      "claudeMd": "src/core/llm/CLAUDE.md",
+      "files": ["factory.ts", "openai.ts", "anthropic.ts", "response-parser.ts"],
+      "interfaces": ["ILLMProvider"],
+      "coverage": {
+        "scanned": true,
+        "filesScanned": 4,
+        "filesTotal": 4,
+        "percentage": 100
+      }
+    },
+    {
+      "path": "src/core/image",
+      "name": "image-generation",
+      "description": "AI 图片生成服务",
+      "entry": "provider.ts",
+      "claudeMd": "src/core/image/CLAUDE.md",
+      "files": ["provider.ts"],
+      "coverage": {
+        "scanned": true,
+        "filesScanned": 1,
+        "filesTotal": 1,
+        "percentage": 100
+      }
+    },
+    {
+      "path": "src/ui",
+      "name": "ui",
+      "description": "React UI 组件库",
+      "claudeMd": "src/ui/CLAUDE.md",
+      "files": [
+        "components/chat/ChatView.tsx",
+        "components/chat/MessageList.tsx",
+        "components/chat/MessageBubble.tsx",
+        "components/chat/InputArea.tsx",
+        "components/chat/QuickActions.tsx",
+        "components/chat/cards/SlideGenerationCard.tsx",
+        "components/common/ContextIndicator.tsx",
+        "components/common/ProcessStepIndicator.tsx",
+        "components/layout/TaskPane.tsx",
+        "components/layout/Header.tsx",
+        "components/settings/SettingsView.tsx",
+        "hooks/useLLMStream.ts",
+        "hooks/useOfficeSelection.ts",
+        "hooks/usePresentationContext.ts",
+        "hooks/useSlideGenerator.ts",
+        "hooks/useImageGeneration.ts",
+        "store/appStore.ts",
+        "styles/designTokens.ts"
+      ],
+      "dependencies": ["react", "@fluentui/react-components", "@fluentui/react-icons", "zustand"],
+      "coverage": {
+        "scanned": true,
+        "filesScanned": 18,
+        "filesTotal": 18,
+        "percentage": 100
+      }
+    },
+    {
+      "path": "src/types",
+      "name": "types",
+      "description": "TypeScript 类型定义",
+      "entry": "index.ts",
+      "claudeMd": "src/types/CLAUDE.md",
+      "files": ["index.ts", "slide-spec.ts"],
+      "coverage": {
+        "scanned": true,
+        "filesScanned": 2,
+        "filesTotal": 2,
+        "percentage": 100
+      }
+    }
+  ],
+  "rootFiles": [
+    {
+      "path": "package.json",
+      "type": "config",
+      "scanned": true
+    },
+    {
+      "path": "tsconfig.json",
+      "type": "config",
+      "scanned": true
+    },
+    {
+      "path": "webpack.config.js",
+      "type": "config",
+      "scanned": true
+    },
+    {
+      "path": "manifest.xml",
+      "type": "config",
+      "scanned": true
+    },
+    {
+      "path": ".gitignore",
+      "type": "config",
+      "scanned": true
+    }
+  ],
+  "coverage": {
+    "totalFiles": 31,
+    "scannedFiles": 31,
+    "percentage": 100,
+    "ignoredPatterns": [
+      "node_modules/**",
+      "dist/**",
+      ".ace-tool/**",
+      "*.log"
+    ],
+    "gaps": []
+  },
+  "claudeMdFiles": [
+    {
+      "path": "CLAUDE.md",
+      "type": "root",
+      "status": "created"
+    },
+    {
+      "path": "src/taskpane/CLAUDE.md",
+      "type": "module",
+      "status": "created"
+    },
+    {
+      "path": "src/adapters/powerpoint/CLAUDE.md",
+      "type": "module",
+      "status": "created"
+    },
+    {
+      "path": "src/core/llm/CLAUDE.md",
+      "type": "module",
+      "status": "created"
+    },
+    {
+      "path": "src/core/image/CLAUDE.md",
+      "type": "module",
+      "status": "created"
+    },
+    {
+      "path": "src/ui/CLAUDE.md",
+      "type": "module",
+      "status": "created"
+    },
+    {
+      "path": "src/types/CLAUDE.md",
+      "type": "module",
+      "status": "created"
+    }
+  ],
+  "truncated": false,
+  "nextSteps": []
+}

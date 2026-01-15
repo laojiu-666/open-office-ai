@@ -1,39 +1,47 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { Settings24Regular } from '@fluentui/react-icons';
+import { Settings24Regular, ArrowLeft24Regular } from '@fluentui/react-icons';
 import { useAppStore } from '@ui/store/appStore';
+import { glassEffect, layoutDimensions, createTransition } from '@ui/styles/designTokens';
 
 const useStyles = makeStyles({
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '12px 16px',
-    borderBottom: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
+    padding: '10px 16px',
+    height: layoutDimensions.headerHeight,
+    position: 'sticky',
+    top: 0,
+    zIndex: 100,
+    backgroundColor: glassEffect.background,
+    backdropFilter: glassEffect.backdropFilter,
+    WebkitBackdropFilter: glassEffect.backdropFilter,
+    borderBottom: `1px solid rgba(0, 0, 0, 0.06)`,
   },
   title: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    fontSize: '16px',
+    gap: '10px',
+    fontSize: '15px',
     fontWeight: 600,
     color: tokens.colorNeutralForeground1,
   },
   logo: {
-    width: '24px',
-    height: '24px',
-    borderRadius: '4px',
-    backgroundColor: tokens.colorBrandBackground,
+    width: '28px',
+    height: '28px',
+    borderRadius: '8px',
+    background: 'linear-gradient(135deg, #0078D4, #a855f7)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     color: 'white',
     fontSize: '12px',
     fontWeight: 700,
+    boxShadow: '0 2px 8px rgba(0, 120, 212, 0.25)',
   },
   settingsButton: {
-    padding: '6px',
-    borderRadius: '4px',
+    padding: '8px',
+    borderRadius: '8px',
     border: 'none',
     backgroundColor: 'transparent',
     cursor: 'pointer',
@@ -41,9 +49,13 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     color: tokens.colorNeutralForeground2,
-    transition: 'background-color 0.15s',
+    transition: createTransition(['background-color', 'color', 'transform'], 'fast'),
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
+      color: tokens.colorNeutralForeground1,
+    },
+    ':active': {
+      transform: 'scale(0.95)',
     },
   },
 });
@@ -67,7 +79,7 @@ export function Header() {
         onClick={handleSettingsClick}
         title={currentView === 'settings' ? '返回聊天' : '设置'}
       >
-        <Settings24Regular />
+        {currentView === 'settings' ? <ArrowLeft24Regular /> : <Settings24Regular />}
       </button>
     </header>
   );

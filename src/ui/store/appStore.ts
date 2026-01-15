@@ -1,6 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { LLMProviderId, ProviderConfig, ChatMessage } from '@/types';
+import type { LLMProviderId, ProviderConfig, ChatMessage, ImageGenConfig, PresentationContext } from '@/types';
+
+// 默认图片生成配置
+const defaultImageGenConfig: ImageGenConfig = {
+  enabled: false,
+  apiKey: '',
+  baseUrl: 'https://api.openai.com/v1',
+  model: 'dall-e-3',
+  defaultSize: '1024x1024',
+};
+
+// 默认演示文稿上下文
+const defaultPresentationContext: PresentationContext = {
+  slideCount: 0,
+  currentSlideIndex: 0,
+  slideWidth: 960,
+  slideHeight: 540,
+};
 
 interface AppState {
   // View
@@ -13,6 +30,14 @@ interface AppState {
   setActiveProvider: (id: LLMProviderId) => void;
   updateProviderConfig: (id: LLMProviderId, config: Partial<ProviderConfig>) => void;
 
+  // Image Generation Config
+  imageGenConfig: ImageGenConfig;
+  updateImageGenConfig: (config: Partial<ImageGenConfig>) => void;
+
+  // Presentation Context
+  presentationContext: PresentationContext;
+  updatePresentationContext: (context: Partial<PresentationContext>) => void;
+
   // Chat
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -24,6 +49,10 @@ interface AppState {
   // Selection
   currentSelection: string;
   setCurrentSelection: (text: string) => void;
+
+  // Slide Generation
+  isGeneratingSlide: boolean;
+  setGeneratingSlide: (generating: boolean) => void;
 }
 
 const defaultProviders: Record<LLMProviderId, ProviderConfig> = {
@@ -66,6 +95,20 @@ export const useAppStore = create<AppState>()(
           },
         })),
 
+      // Image Generation Config
+      imageGenConfig: defaultImageGenConfig,
+      updateImageGenConfig: (config) =>
+        set((state) => ({
+          imageGenConfig: { ...state.imageGenConfig, ...config },
+        })),
+
+      // Presentation Context
+      presentationContext: defaultPresentationContext,
+      updatePresentationContext: (context) =>
+        set((state) => ({
+          presentationContext: { ...state.presentationContext, ...context },
+        })),
+
       // Chat
       messages: [],
       isStreaming: false,
@@ -83,18 +126,17 @@ export const useAppStore = create<AppState>()(
       // Selection
       currentSelection: '',
       setCurrentSelection: (text) => set({ currentSelection: text }),
+
+      // Slide Generation
+      isGeneratingSlide: false,
+      setGeneratingSlide: (generating) => set({ isGeneratingSlide: generating }),
     }),
     {
       name: 'open-office-ai-storage',
       partialize: (state) => ({
         activeProviderId: state.activeProviderId,
-        // 不持久化 apiKey，仅保存其他配置
-        providers: Object.fromEntries(
-          Object.entries(state.providers).map(([id, cfg]) => [
-            id,
-            { ...cfg, apiKey: '' },
-          ])
-        ) as Record<LLMProviderId, ProviderConfig>,
+        providers: state.providers,
+        imageGenConfig: state.imageGenConfig,
       }),
     }
   )

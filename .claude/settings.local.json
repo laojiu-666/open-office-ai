@@ -18,7 +18,13 @@
       "Bash(cmd /c:*)",
       "Bash(reg query:*)",
       "Bash(reg add:*)",
-      "Bash(net share:*)"
+      "Bash(net share:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: implement Office AI plugin with LLM integration\n\n- Add LLM provider abstraction \\(OpenAI, Anthropic, custom\\)\n- Implement PowerPoint adapter for text selection/replacement\n- Create React UI with chat interface and settings panel\n- Add streaming response support with abort control\n- Configure Office Add-in manifest and webpack build\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "WebFetch(domain:github.com)",
+      "mcp__desktop-commander__list_directory",
+      "mcp__desktop-commander__read_file",
+      "WebSearch",
+      "Bash(node -e:*)"
     ]
   }
 }
