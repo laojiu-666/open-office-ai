@@ -1,273 +1,191 @@
-import { useId } from 'react';
-import { makeStyles, tokens, Input, Label, Select, Button, Switch } from '@fluentui/react-components';
+/**
+ * 设置主页面 - 列表导航
+ */
+
+import React from 'react';
+import { makeStyles, tokens, Text, Button } from '@fluentui/react-components';
+import {
+  PlugConnected24Regular,
+  ChevronRight20Regular,
+  CodeRegular,
+} from '@fluentui/react-icons';
 import { useAppStore } from '@ui/store/appStore';
-import type { LLMProviderId } from '@/types';
-import { shadows, layoutDimensions, createTransition, aiEffects } from '@ui/styles/designTokens';
+import { shadows, layoutDimensions, createTransition } from '@ui/styles/designTokens';
+import { ConnectionsPage } from './pages';
+import { DeveloperPage } from '../developer';
 
 const useStyles = makeStyles({
   container: {
-    padding: '16px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
-    overflow: 'auto',
+    height: '100%',
   },
-  card: {
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: layoutDimensions.cardBorderRadius,
-    padding: '16px',
-    boxShadow: shadows.card,
-  },
-  sectionTitle: {
-    fontSize: '13px',
-    fontWeight: 600,
-    color: tokens.colorNeutralForeground1,
-    marginBottom: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  sectionIcon: {
-    width: '20px',
-    height: '20px',
-    borderRadius: '6px',
-    background: 'linear-gradient(135deg, rgba(0, 120, 212, 0.1), rgba(168, 85, 247, 0.1))',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '10px',
-  },
-  field: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    marginBottom: '12px',
-    ':last-child': {
-      marginBottom: 0,
-    },
-  },
-  fieldRow: {
+  header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: '12px',
+    padding: '12px 16px',
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  label: {
-    fontSize: '12px',
-    fontWeight: 500,
-    color: tokens.colorNeutralForeground2,
-  },
-  input: {
-    transition: createTransition(['border-color', 'box-shadow'], 'fast'),
-    ':focus-within': {
-      borderTopColor: tokens.colorBrandStroke1,
-      borderRightColor: tokens.colorBrandStroke1,
-      borderBottomColor: tokens.colorBrandStroke1,
-      borderLeftColor: tokens.colorBrandStroke1,
-      boxShadow: aiEffects.brandGlow,
-    },
-  },
-  actions: {
-    marginTop: '4px',
-  },
-  saveButton: {
-    width: '100%',
-    height: '40px',
-    borderRadius: '10px',
+  title: {
     fontWeight: 600,
-    transition: createTransition(['transform', 'box-shadow'], 'fast'),
+    fontSize: '16px',
+  },
+  content: {
+    flex: 1,
+    padding: '16px',
+    overflow: 'auto',
+  },
+  menuList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+  },
+  menuItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '14px 16px',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: layoutDimensions.cardBorderRadius,
+    boxShadow: shadows.card,
+    cursor: 'pointer',
+    border: 'none',
+    width: '100%',
+    textAlign: 'left',
+    transition: createTransition(['background-color', 'transform'], 'fast'),
     ':hover': {
-      transform: 'translateY(-1px)',
-      boxShadow: '0 4px 12px rgba(0, 120, 212, 0.25)',
+      backgroundColor: tokens.colorNeutralBackground1Hover,
     },
     ':active': {
-      transform: 'translateY(0)',
+      transform: 'scale(0.99)',
     },
   },
-  disabledFields: {
-    opacity: 0.5,
-    pointerEvents: 'none' as const,
+  menuIcon: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '10px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  menuIconConnections: {
+    background: 'linear-gradient(135deg, #0078D4 0%, #106EBE 100%)',
+    color: 'white',
+  },
+  menuIconDeveloper: {
+    background: 'linear-gradient(135deg, #6B7280 0%, #374151 100%)',
+    color: 'white',
+  },
+  menuContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  menuTitle: {
+    fontWeight: 600,
+    fontSize: '14px',
+    display: 'block',
+  },
+  menuDescription: {
+    fontSize: '12px',
+    color: tokens.colorNeutralForeground3,
+    display: 'block',
+    marginTop: '2px',
+  },
+  menuArrow: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+  },
+  footer: {
+    padding: '16px',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  backButton: {
+    width: '100%',
   },
 });
 
-const providerOptions = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic Claude' },
-  { value: 'custom', label: '自定义 (OpenAI 兼容)' },
-];
+interface MenuItemProps {
+  icon: React.ReactNode;
+  iconClass: string;
+  title: string;
+  description: string;
+  onClick: () => void;
+}
 
-const imageSizeOptions = [
-  { value: '512x512', label: '512x512' },
-  { value: '1024x1024', label: '1024x1024' },
-];
-
-export function SettingsView() {
+function MenuItem({ icon, iconClass, title, description, onClick }: MenuItemProps) {
   const styles = useStyles();
-  const {
-    activeProviderId,
-    providers,
-    setActiveProvider,
-    updateProviderConfig,
-    imageGenConfig,
-    updateImageGenConfig,
-    switchView,
-  } = useAppStore();
-  const currentConfig = providers[activeProviderId];
 
-  const providerId = useId();
-  const apiKeyId = useId();
-  const baseUrlId = useId();
-  const modelId = useId();
-  const imageApiKeyId = useId();
-  const imageBaseUrlId = useId();
-  const imageModelId = useId();
-  const imageSizeId = useId();
+  return (
+    <button className={styles.menuItem} onClick={onClick}>
+      <div className={`${styles.menuIcon} ${iconClass}`}>
+        {icon}
+      </div>
+      <div className={styles.menuContent}>
+        <Text className={styles.menuTitle}>{title}</Text>
+        <Text className={styles.menuDescription}>{description}</Text>
+      </div>
+      <ChevronRight20Regular className={styles.menuArrow} />
+    </button>
+  );
+}
 
-  const handleProviderChange = (value: string) => {
-    setActiveProvider(value as LLMProviderId);
-  };
+function SettingsMain() {
+  const styles = useStyles();
+  const { switchView, setSettingsPage, connections, activeConnectionId } = useAppStore();
 
-  const handleSave = () => {
-    switchView('chat');
-  };
+  const activeConnection = connections.find(c => c.id === activeConnectionId);
+  const connectionDesc = activeConnection
+    ? `当前：${activeConnection.name}`
+    : `${connections.length} 个连接`;
 
   return (
     <div className={styles.container}>
-      {/* LLM API 配置 */}
-      <div className={styles.card}>
-        <div className={styles.sectionTitle}>
-          <span className={styles.sectionIcon}>🔑</span>
-          LLM API 配置
-        </div>
-
-        <div className={styles.field}>
-          <Label htmlFor={providerId} className={styles.label}>服务商</Label>
-          <Select
-            id={providerId}
-            value={activeProviderId}
-            onChange={(_, data) => handleProviderChange(data.value)}
-            className={styles.input}
-          >
-            {providerOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div className={styles.field}>
-          <Label htmlFor={apiKeyId} className={styles.label}>API Key</Label>
-          <Input
-            id={apiKeyId}
-            type="password"
-            value={currentConfig.apiKey}
-            onChange={(_, data) => updateProviderConfig(activeProviderId, { apiKey: data.value })}
-            placeholder="sk-..."
-            className={styles.input}
+      <div className={styles.header}>
+        <Text className={styles.title}>设置</Text>
+      </div>
+      <div className={styles.content}>
+        <div className={styles.menuList}>
+          <MenuItem
+            icon={<PlugConnected24Regular />}
+            iconClass={styles.menuIconConnections}
+            title="AI 连接"
+            description={connectionDesc}
+            onClick={() => setSettingsPage('connections')}
           />
-        </div>
-
-        <div className={styles.field}>
-          <Label htmlFor={baseUrlId} className={styles.label}>API 端点</Label>
-          <Input
-            id={baseUrlId}
-            value={currentConfig.baseUrl}
-            onChange={(_, data) => updateProviderConfig(activeProviderId, { baseUrl: data.value })}
-            placeholder="https://api.openai.com/v1"
-            className={styles.input}
+          <MenuItem
+            icon={<CodeRegular />}
+            iconClass={styles.menuIconDeveloper}
+            title="开发者工具"
+            description="测试 PPT 核心功能"
+            onClick={() => setSettingsPage('developer')}
           />
-        </div>
-
-        <div className={styles.field}>
-          <Label htmlFor={modelId} className={styles.label}>模型</Label>
-          <Input
-            id={modelId}
-            value={currentConfig.model}
-            onChange={(_, data) => updateProviderConfig(activeProviderId, { model: data.value })}
-            placeholder="gpt-4o-mini"
-            className={styles.input}
-          />
+          {/* TODO: 云同步功能暂时禁用，待解决 CORS 问题后恢复 */}
         </div>
       </div>
-
-      {/* 图片生成 API 配置 */}
-      <div className={styles.card}>
-        <div className={styles.sectionTitle}>
-          <span className={styles.sectionIcon}>🎨</span>
-          图片生成 API
-        </div>
-
-        <div className={styles.fieldRow}>
-          <Label className={styles.label}>启用图片生成</Label>
-          <Switch
-            checked={imageGenConfig.enabled}
-            onChange={(_, data) => updateImageGenConfig({ enabled: data.checked })}
-          />
-        </div>
-
-        <div className={imageGenConfig.enabled ? '' : styles.disabledFields}>
-          <div className={styles.field}>
-            <Label htmlFor={imageApiKeyId} className={styles.label}>API Key</Label>
-            <Input
-              id={imageApiKeyId}
-              type="password"
-              value={imageGenConfig.apiKey}
-              onChange={(_, data) => updateImageGenConfig({ apiKey: data.value })}
-              placeholder="sk-..."
-              className={styles.input}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <Label htmlFor={imageBaseUrlId} className={styles.label}>API 端点</Label>
-            <Input
-              id={imageBaseUrlId}
-              value={imageGenConfig.baseUrl}
-              onChange={(_, data) => updateImageGenConfig({ baseUrl: data.value })}
-              placeholder="https://api.openai.com/v1"
-              className={styles.input}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <Label htmlFor={imageModelId} className={styles.label}>模型</Label>
-            <Input
-              id={imageModelId}
-              value={imageGenConfig.model}
-              onChange={(_, data) => updateImageGenConfig({ model: data.value })}
-              placeholder="dall-e-3"
-              className={styles.input}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <Label htmlFor={imageSizeId} className={styles.label}>默认尺寸</Label>
-            <Select
-              id={imageSizeId}
-              value={imageGenConfig.defaultSize}
-              onChange={(_, data) => updateImageGenConfig({ defaultSize: data.value as '512x512' | '1024x1024' })}
-              className={styles.input}
-            >
-              {imageSizeOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.actions}>
+      <div className={styles.footer}>
         <Button
           appearance="primary"
-          onClick={handleSave}
-          className={styles.saveButton}
+          className={styles.backButton}
+          onClick={() => switchView('chat')}
         >
-          保存并返回
+          返回聊天
         </Button>
       </div>
     </div>
   );
+}
+
+export function SettingsView() {
+  const settingsPage = useAppStore((state) => state.settingsPage);
+
+  switch (settingsPage) {
+    case 'connections':
+      return <ConnectionsPage />;
+    case 'developer':
+      return <DeveloperPage />;
+    default:
+      return <SettingsMain />;
+  }
 }
