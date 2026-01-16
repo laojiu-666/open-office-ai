@@ -20,29 +20,34 @@ interface UseImageGenerationReturn {
 
 export function useImageGeneration(): UseImageGenerationReturn {
   const imageGenConfig = useAppStore((state) => state.imageGenConfig);
+  const getActiveConnection = useAppStore((state) => state.getActiveConnection);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<ImageGenerationError | null>(null);
   const [lastResult, setLastResult] = useState<ImageGenResponse | null>(null);
 
-  const isEnabled = imageGenConfig.enabled;
-  const isConfigured = Boolean(imageGenConfig.apiKey && imageGenConfig.baseUrl);
+  const activeConnection = getActiveConnection();
+  // 如果连接配置了图片模型，则自动启用图片生成
+  const isEnabled = imageGenConfig.enabled || Boolean(activeConnection?.imageModel);
+  const isConfigured = Boolean(activeConnection?.apiKey && activeConnection?.imageModel);
 
   const generateImage = useCallback(
     async (request: ImageGenRequest): Promise<ImageGenResponse | null> => {
-      if (!isEnabled) {
+      const connection = getActiveConnection();
+
+      if (!connection) {
         setError({
           code: 'config_missing',
-          message: '图片生成功能未启用，请在设置中开启',
+          message: '请先配置并激活一个 AI 连接',
           retryable: false,
         });
         return null;
       }
 
-      if (!isConfigured) {
+      if (!connection.imageModel) {
         setError({
           code: 'config_missing',
-          message: '请先配置图片生成 API',
+          message: '当前连接未配置图片生成模型，请在连接设置中添加图片模型（如 dall-e-3）',
           retryable: false,
         });
         return null;
@@ -52,11 +57,14 @@ export function useImageGeneration(): UseImageGenerationReturn {
       setError(null);
 
       try {
-        const provider = createImageGenerationProvider(imageGenConfig);
+        console.log('[useImageGeneration] Creating provider with config:', imageGenConfig, 'connection:', connection.name);
+        const provider = createImageGenerationProvider(imageGenConfig, connection);
         const result = await provider.generate(request);
+        console.log('[useImageGeneration] Image generated successfully');
         setLastResult(result);
         return result;
       } catch (err) {
+        console.error('[useImageGeneration] Image generation error:', err);
         const imageError = err as ImageGenerationError;
         setError(imageError);
         return null;
@@ -64,7 +72,7 @@ export function useImageGeneration(): UseImageGenerationReturn {
         setIsGenerating(false);
       }
     },
-    [imageGenConfig, isEnabled, isConfigured]
+    [imageGenConfig, getActiveConnection]
   );
 
   const clearError = useCallback(() => {

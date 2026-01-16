@@ -1,8 +1,11 @@
-import type { ImageGenConfig, ImageGenRequest, ImageGenResponse } from '@/types';
+import type { ImageGenConfig, ImageGenRequest, ImageGenResponse } from './types';
+import type { AIConnection } from '@/types';
+import { normalizeBaseUrl } from '@core/llm/presets';
 
 /**
  * 图片生成服务
  * 支持 OpenAI DALL-E 兼容的 API
+ * 复用 AI 连接的 API Key 和 baseUrl
  */
 
 export interface ImageGenerationError {
@@ -13,35 +16,47 @@ export interface ImageGenerationError {
 
 export class ImageGenerationProvider {
   private config: ImageGenConfig;
+  private connection: AIConnection | null;
 
-  constructor(config: ImageGenConfig) {
+  constructor(config: ImageGenConfig, connection: AIConnection | null) {
     this.config = config;
+    this.connection = connection;
   }
 
   /**
    * 生成图片
    */
   async generate(request: ImageGenRequest): Promise<ImageGenResponse> {
-    if (!this.config.enabled) {
-      throw this.createError('config_missing', '图片生成功能未启用');
+    if (!this.connection) {
+      throw this.createError('config_missing', '请先配置并激活一个 AI 连接');
     }
 
-    if (!this.config.apiKey) {
-      throw this.createError('config_missing', '请先配置图片生成 API Key');
+    if (!this.connection.apiKey) {
+      throw this.createError('config_missing', '当前连接未配置 API Key');
+    }
+
+    // 使用连接配置的图片模型，如果没有则使用默认配置
+    const imageModel = this.connection.imageModel || this.config.model;
+    if (!imageModel) {
+      throw this.createError('config_missing', '当前连接未配置图片生成模型');
     }
 
     const size = request.size || this.config.defaultSize;
     const [width, height] = size.split('x').map(Number);
 
+    // 构建 API URL，使用连接的 baseUrl
+    const baseUrl = normalizeBaseUrl(this.connection.baseUrl, this.connection.providerId);
+    const apiUrl = `${baseUrl}/images/generations`;
+
     try {
-      const response = await fetch(`${this.config.baseUrl}/images/generations`, {
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Authorization': `Bearer ${this.connection.apiKey}`,
         },
         body: JSON.stringify({
-          model: this.config.model,
+          model: imageModel,
           prompt: request.prompt,
           n: 1,
           size: size,
@@ -98,16 +113,16 @@ export class ImageGenerationProvider {
    * 测试连接
    */
   async testConnection(): Promise<boolean> {
-    if (!this.config.apiKey) {
+    if (!this.connection?.apiKey) {
       return false;
     }
 
     try {
-      // 发送一个简单的请求来验证 API Key
-      const response = await fetch(`${this.config.baseUrl}/models`, {
+      const baseUrl = normalizeBaseUrl(this.connection.baseUrl, this.connection.providerId);
+      const response = await fetch(`${baseUrl}/models`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Authorization': `Bearer ${this.connection.apiKey}`,
         },
       });
 
@@ -129,6 +144,9 @@ export class ImageGenerationProvider {
 /**
  * 创建图片生成 Provider 实例
  */
-export function createImageGenerationProvider(config: ImageGenConfig): ImageGenerationProvider {
-  return new ImageGenerationProvider(config);
+export function createImageGenerationProvider(
+  config: ImageGenConfig,
+  connection: AIConnection | null
+): ImageGenerationProvider {
+  return new ImageGenerationProvider(config, connection);
 }

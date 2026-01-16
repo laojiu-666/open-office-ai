@@ -29,7 +29,7 @@ interface UseSlideGeneratorReturn {
 
 export function useSlideGenerator(): UseSlideGeneratorReturn {
   const setGeneratingSlide = useAppStore((state) => state.setGeneratingSlide);
-  const { generateImage, isEnabled: imageGenEnabled } = useImageGeneration();
+  const { generateImage, isEnabled: imageGenEnabled, error: imageGenError } = useImageGeneration();
 
   const [currentStep, setCurrentStep] = useState<GenerationStep>('idle');
   const [progress, setProgress] = useState(0);
@@ -52,6 +52,8 @@ export function useSlideGenerator(): UseSlideGeneratorReturn {
         const imageBlocks = spec.blocks.filter((b) => b.kind === 'image');
         const updatedAssets: ImageAsset[] = [...(spec.assets || [])];
 
+        console.log('[useSlideGenerator] imageBlocks:', imageBlocks.length, 'imageGenEnabled:', imageGenEnabled);
+
         if (imageBlocks.length > 0 && imageGenEnabled) {
           setCurrentStep('generating_image');
           setProgress(40);
@@ -65,7 +67,12 @@ export function useSlideGenerator(): UseSlideGeneratorReturn {
             if (existingAsset?.data) continue;
 
             // 生成图片
+            console.log('[useSlideGenerator] Generating image for prompt:', block.prompt.substring(0, 50));
             const result = await generateImage({ prompt: block.prompt });
+            console.log('[useSlideGenerator] Image generation result:', result ? 'success' : 'failed');
+            if (!result) {
+              console.error('[useSlideGenerator] Image generation failed, imageGenError:', imageGenError);
+            }
             if (result) {
               const assetId = block.assetId || `asset_${i}`;
               const existingIndex = updatedAssets.findIndex((a) => a.id === assetId);

@@ -11,12 +11,10 @@ export type ImageStyle = 'photorealistic' | 'illustration' | 'flat';
 /** 图片格式 */
 export type ImageFormat = 'png' | 'jpeg';
 
-/** 图片生成配置 */
+/** 图片生成配置（复用 AI 连接的 API Key 和 baseUrl） */
 export interface ImageGenConfig {
   enabled: boolean;
-  apiKey: string;
-  baseUrl: string;
-  model: string;
+  model: string;           // 图片生成模型，如 'dall-e-3'
   defaultSize: ImageSize;
 }
 

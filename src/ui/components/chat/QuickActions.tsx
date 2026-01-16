@@ -58,11 +58,8 @@ const useStyles = makeStyles({
 });
 
 const quickPrompts = [
-  { label: '润色', prompt: '请润色这段文字，使其更加流畅专业' },
-  { label: '精简', prompt: '请精简这段文字，保留核心内容' },
-  { label: '扩展', prompt: '请扩展这段文字，增加更多细节' },
-  { label: '翻译成英文', prompt: '请将这段文字翻译成英文' },
-  { label: '生成要点', prompt: '请将这段文字整理成要点列表' },
+  { label: '总结', prompt: '请总结这段文字的核心内容' },
+  { label: '翻译', prompt: '请将这段文字翻译成英文' },
 ];
 
 export function QuickActions() {
@@ -73,7 +70,7 @@ export function QuickActions() {
 
   const handleClick = async (prompt: string) => {
     if (isStreaming) return;
-    await sendMessage(prompt, currentSelection || undefined);
+    await sendMessage(prompt, currentSelection ? { selectedText: currentSelection } : undefined);
   };
 
   return (

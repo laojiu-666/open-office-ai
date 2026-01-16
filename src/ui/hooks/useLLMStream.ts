@@ -1,6 +1,7 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '@ui/store/appStore';
 import { createLLMProvider } from '@core/llm/factory';
+import { createImageGenerationProvider } from '@core/image/provider';
 import {
   isSlideGenerationRequest,
   extractSlideSpec,
@@ -29,6 +30,23 @@ const CONTEXT_USAGE_RATIO = 0.7;
 const SYSTEM_PROMPT_RESERVE = 500;
 // 文档上下文预留 tokens
 const DOC_CONTEXT_RESERVE = 1500;
+
+/**
+ * 检测是否为图片生成请求
+ */
+function isImageGenerationRequest(content: string): boolean {
+  const imageKeywords = [
+    '生成图片', '生成图像', '生成一张图', '生成一幅图',
+    '画一张', '画一幅', '画个', '画一个',
+    '绘制', '绘画',
+    '创建图片', '创建图像',
+    '做一张图', '做张图',
+    '配图', '插图',
+    'generate image', 'create image', 'draw',
+  ];
+  const lowerContent = content.toLowerCase();
+  return imageKeywords.some(keyword => lowerContent.includes(keyword.toLowerCase()));
+}
 
 /**
  * 估算文本的 token 数量
@@ -86,7 +104,7 @@ function buildHistoryMessagesWithBudget(
 }
 
 export function useLLMStream() {
-  const { activeProviderId, providers, messages: historyMessages, addMessage, updateMessage, setStreaming } = useAppStore();
+  const { getActiveConnection, activeProviderId, providers, messages: historyMessages, addMessage, updateMessage, setStreaming, imageGenConfig } = useAppStore();
   const controllerRef = useRef<LLMStreamController | null>(null);
 
   // 组件卸载时清理流式请求
@@ -108,13 +126,55 @@ export function useLLMStream() {
         theme?: { fonts?: { heading?: string; body?: string }; colors?: Record<string, string> };
       }
     ) => {
-      const config = providers[activeProviderId];
+      // 优先使用新版连接系统
+      const activeConnection = getActiveConnection();
+      const config = activeConnection
+        ? {
+            providerId: activeConnection.providerId,
+            apiKey: activeConnection.apiKey,
+            baseUrl: activeConnection.baseUrl,
+            model: activeConnection.model,
+          }
+        : providers[activeProviderId];
+
       if (!config.apiKey) {
         // 显示友好提示而不是抛出错误
         const errorMessage: ChatMessage = {
           id: crypto.randomUUID(),
           role: 'assistant',
           content: '请先在设置中配置 API Key',
+          timestamp: Date.now(),
+          status: 'error',
+        };
+        addMessage(errorMessage);
+        return;
+      }
+
+      // 检测是否为图片生成请求
+      const isImageRequest = isImageGenerationRequest(userContent);
+      const canGenerateImage = !!(activeConnection?.imageModel);
+
+      // 如果是图片生成请求且支持生图
+      if (isImageRequest && canGenerateImage) {
+        await handleImageGeneration(userContent, activeConnection);
+        return;
+      }
+
+      // 如果是图片生成请求但不支持生图，提示用户
+      if (isImageRequest && !canGenerateImage) {
+        const userMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: userContent,
+          timestamp: Date.now(),
+          status: 'completed',
+        };
+        addMessage(userMessage);
+
+        const errorMessage: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: '当前连接未配置图片生成模型。请在设置中编辑连接，添加图片模型（如 dall-e-3）。',
           timestamp: Date.now(),
           status: 'error',
         };
@@ -268,12 +328,17 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
               },
               onComplete: () => {
                 // 尝试从响应中提取 SlideSpec
+                // 如果是幻灯片请求，或者响应看起来包含 JSON，都尝试解析
                 let slideSpec: SlideSpec | null = null;
-                if (isSlideRequest) {
+                const looksLikeJson = fullResponse.includes('"blocks"') || fullResponse.includes('"kind"');
+
+                if (isSlideRequest || looksLikeJson) {
                   slideSpec = extractSlideSpec(fullResponse);
+                  console.log('[useLLMStream] isSlideRequest:', isSlideRequest, 'looksLikeJson:', looksLikeJson, 'extracted slideSpec:', slideSpec);
                 }
 
                 // 更新消息状态
+                console.log('[useLLMStream] Updating message with slideSpec:', slideSpec ? 'present' : 'null');
                 updateMessage(assistantMessage.id, {
                   status: 'completed',
                   slideSpec: slideSpec || undefined,
@@ -311,7 +376,53 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
 
       await executeStream(messages);
     },
-    [activeProviderId, providers, historyMessages, addMessage, updateMessage, setStreaming]
+    [getActiveConnection, activeProviderId, providers, historyMessages, addMessage, updateMessage, setStreaming, imageGenConfig]
+  );
+
+  // 处理图片生成请求
+  const handleImageGeneration = useCallback(
+    async (userContent: string, connection: NonNullable<ReturnType<typeof getActiveConnection>>) => {
+      // 添加用户消息
+      const userMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: userContent,
+        timestamp: Date.now(),
+        status: 'completed',
+      };
+      addMessage(userMessage);
+
+      // 添加助手消息占位
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '正在生成图片...',
+        timestamp: Date.now(),
+        status: 'streaming',
+      };
+      addMessage(assistantMessage);
+      setStreaming(true);
+
+      try {
+        const imageProvider = createImageGenerationProvider(imageGenConfig, connection);
+        const result = await imageProvider.generate({ prompt: userContent });
+
+        // 更新消息，包含图片
+        updateMessage(assistantMessage.id, {
+          status: 'completed',
+          content: `![生成的图片](data:image/${result.format};base64,${result.data})\n\n图片已生成（${result.width}x${result.height}）`,
+        });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : '图片生成失败';
+        updateMessage(assistantMessage.id, {
+          status: 'error',
+          content: `图片生成失败: ${errorMsg}`,
+        });
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [addMessage, updateMessage, setStreaming, imageGenConfig]
   );
 
   const stopStream = useCallback(() => {
