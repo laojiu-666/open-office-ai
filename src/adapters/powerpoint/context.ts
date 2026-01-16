@@ -51,9 +51,22 @@ export async function getPresentationContext(): Promise<PresentationContext> {
         // 如果无法获取选中幻灯片，使用默认值
       }
 
-      // 默认幻灯片尺寸（标准 16:9）
-      const slideWidth = 960;
-      const slideHeight = 540;
+      // 尝试获取实际幻灯片尺寸（PowerPointApi 1.10+）
+      let slideWidth = 960;
+      let slideHeight = 540;
+      try {
+        if (Office.context.requirements.isSetSupported('PowerPointApi', '1.10')) {
+          const pageSetup = (presentation as any).pageSetup;
+          if (pageSetup) {
+            pageSetup.load(['slideWidth', 'slideHeight']);
+            await context.sync();
+            slideWidth = pageSetup.slideWidth ?? 960;
+            slideHeight = pageSetup.slideHeight ?? 540;
+          }
+        }
+      } catch {
+        // API 不支持或获取失败，使用默认值
+      }
 
       resolve({
         slideCount,
@@ -213,8 +226,12 @@ export async function getSelectionContext(): Promise<SelectionContext> {
               await context.sync();
               slideId = slide.id;
 
-              // 尝试获取选中的形状
-              const selectedShapes = slide.shapes.getSelectedShapes();
+              // 尝试获取选中的形状（需要较新版本的 PowerPointApi）
+              const shapesAny = slide.shapes as any;
+              if (typeof shapesAny.getSelectedShapes !== 'function') {
+                return; // API 不支持
+              }
+              const selectedShapes = shapesAny.getSelectedShapes();
               selectedShapes.load('items');
               await context.sync();
 

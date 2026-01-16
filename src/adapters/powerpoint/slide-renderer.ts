@@ -6,7 +6,9 @@ import type {
   TextStyle,
   ImageAsset,
   Bounds,
+  BackgroundSpec,
 } from '@/types';
+import { composeTiledBackground, getImageDimensions } from './canvas-tiler';
 
 /**
  * SlideSpec 渲染器
@@ -55,7 +57,7 @@ const DEFAULT_LAYOUTS: Record<string, { slots: Array<{ id: string; bounds: Bound
  * 应用 SlideSpec 到 PowerPoint
  */
 export async function applySlideSpec(spec: SlideSpec): Promise<ApplySlideSpecResult> {
-  console.log('[applySlideSpec] Starting with spec:', JSON.stringify(spec, null, 2));
+  console.log('[applySlideSpec] Starting with layout:', spec.layout.template, 'blocks:', spec.blocks.length);
 
   return new Promise((resolve) => {
     PowerPoint.run(async (context) => {
@@ -103,9 +105,17 @@ export async function applySlideSpec(spec: SlideSpec): Promise<ApplySlideSpecRes
 
         const createdShapeIds: string[] = [];
 
+        // 应用背景（在添加内容之前）
+        if (spec.background) {
+          const slideSize = { width: 960, height: 540 }; // 默认尺寸
+          const bgResult = await applyBackground(context, newSlide, spec, spec.assets, slideSize);
+          console.log('[applySlideSpec] Background result:', bgResult);
+        }
+
         // 获取布局配置
         const layoutConfig = DEFAULT_LAYOUTS[spec.layout.template] || DEFAULT_LAYOUTS['title-content'];
-        const slots = spec.layout.slots.length > 0 ? spec.layout.slots : layoutConfig.slots;
+        // 始终使用默认布局的 slots（因为 AI 返回的 slots 可能是字符串数组或空数组）
+        const slots = layoutConfig.slots;
         console.log('[applySlideSpec] Using layout:', spec.layout.template, 'slots:', slots);
 
         // 处理每个内容块
@@ -243,6 +253,13 @@ async function applyTextStyle(
       font.italic = style.italic;
     }
 
+    // 应用下划线
+    if (style?.underline !== undefined) {
+      font.underline = style.underline
+        ? PowerPoint.ShapeFontUnderlineStyle.single
+        : PowerPoint.ShapeFontUnderlineStyle.none;
+    }
+
     // 应用颜色
     if (style?.color) {
       const color = resolveColor(style.color, theme);
@@ -259,6 +276,8 @@ async function applyTextStyle(
 
 /**
  * 添加图片形状
+ * 注意：PowerPoint JS API 没有直接的 addImage 方法
+ * 需要先创建矩形形状，然后设置图片填充（需要 PowerPointApi 1.8+）
  */
 async function addImageShape(
   context: PowerPoint.RequestContext,
@@ -267,15 +286,44 @@ async function addImageShape(
   bounds: Bounds
 ): Promise<string | null> {
   try {
-    // 使用 base64 数据添加图片
-    const shape = slide.shapes.addImage(asset.data!, {
+    // 检查 API 版本支持
+    if (!Office.context.requirements.isSetSupported('PowerPointApi', '1.8')) {
+      console.error('[addImageShape] PowerPointApi 1.8 not supported, fill.setImage unavailable');
+      return null;
+    }
+
+    // 确保 base64 数据格式正确
+    // PowerPoint fill.setImage API 需要纯 base64 字符串，不带 data URL 前缀
+    let imageData = asset.data!;
+
+    // 如果数据包含 data URL 前缀，需要移除
+    if (imageData.startsWith('data:')) {
+      const base64Index = imageData.indexOf('base64,');
+      if (base64Index !== -1) {
+        imageData = imageData.substring(base64Index + 7);
+      }
+    }
+
+    console.log('[addImageShape] Image data length:', imageData.length);
+
+    // 创建矩形形状
+    const shape = slide.shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle, {
       left: bounds.x,
       top: bounds.y,
       width: bounds.width,
       height: bounds.height,
     });
 
-    shape.load('id');
+    // 加载 fill 属性
+    shape.load(['id', 'fill']);
+    await context.sync();
+
+    // 设置图片填充
+    shape.fill.setImage(imageData);
+
+    // 移除边框线条
+    shape.lineFormat.visible = false;
+
     await context.sync();
 
     return shape.id;
@@ -307,11 +355,20 @@ function resolveColor(color: string, theme?: SlideSpec['theme']): string | null 
 
 /**
  * 插入图片到当前幻灯片
+ * 需要 PowerPointApi 1.8+ 支持 fill.setImage
  */
 export async function insertImageToCurrentSlide(
   imageData: string,
   bounds?: Partial<Bounds>
 ): Promise<{ success: boolean; shapeId?: string; error?: string }> {
+  // 检查 API 版本支持
+  if (!Office.context.requirements.isSetSupported('PowerPointApi', '1.8')) {
+    return {
+      success: false,
+      error: '您的 PowerPoint 版本不支持图片插入功能（需要 PowerPointApi 1.8+）',
+    };
+  }
+
   return new Promise((resolve) => {
     PowerPoint.run(async (context) => {
       try {
@@ -334,21 +391,42 @@ export async function insertImageToCurrentSlide(
           height: bounds?.height ?? 300,
         };
 
-        const shape = slide.shapes.addImage(imageData, {
+        // 确保 base64 数据格式正确
+        let processedImageData = imageData;
+        if (processedImageData.startsWith('data:')) {
+          const base64Index = processedImageData.indexOf('base64,');
+          if (base64Index !== -1) {
+            processedImageData = processedImageData.substring(base64Index + 7);
+          }
+        }
+
+        // 创建矩形形状并设置图片填充
+        const shape = slide.shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle, {
           left: defaultBounds.x,
           top: defaultBounds.y,
           width: defaultBounds.width,
           height: defaultBounds.height,
         });
 
-        shape.load('id');
+        // 加载 fill 属性
+        shape.load(['id', 'fill']);
+        await context.sync();
+
+        // 设置图片填充
+        shape.fill.setImage(processedImageData);
+
+        // 移除边框线条
+        shape.lineFormat.visible = false;
+
         await context.sync();
 
         resolve({ success: true, shapeId: shape.id });
       } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : '插入图片失败';
+        console.error('[insertImageToCurrentSlide] Error:', error);
         resolve({
           success: false,
-          error: error instanceof Error ? error.message : '插入图片失败',
+          error: errorMsg,
         });
       }
     }).catch((error) => {
@@ -388,7 +466,12 @@ export async function replaceSelectionWithFormat(
 
               if (selectedSlides.items.length > 0) {
                 const slide = selectedSlides.items[0];
-                const selectedShapes = slide.shapes.getSelectedShapes();
+                // 尝试获取选中的形状（需要较新版本的 PowerPointApi）
+                const shapesAny = slide.shapes as any;
+                if (typeof shapesAny.getSelectedShapes !== 'function') {
+                  return; // API 不支持
+                }
+                const selectedShapes = shapesAny.getSelectedShapes();
                 selectedShapes.load('items');
                 await context.sync();
 
@@ -406,5 +489,329 @@ export async function replaceSelectionWithFormat(
         resolve({ success: true });
       }
     );
+  });
+}
+
+/**
+ * 背景应用结果
+ */
+export interface ApplyBackgroundResult {
+  applied: boolean;
+  method?: 'background-api' | 'shape-fallback';
+  error?: string;
+}
+
+/**
+ * 应用背景到幻灯片
+ */
+async function applyBackground(
+  context: PowerPoint.RequestContext,
+  slide: PowerPoint.Slide,
+  spec: SlideSpec,
+  assets: ImageAsset[] | undefined,
+  slideSize: { width: number; height: number }
+): Promise<ApplyBackgroundResult> {
+  const bgSpec = spec.background;
+  if (!bgSpec) {
+    return { applied: false, error: 'no_background_spec' };
+  }
+
+  // 查找背景资源
+  const asset = assets?.find((a) => a.id === bgSpec.assetId);
+  if (!asset || !asset.data) {
+    return { applied: false, error: 'background_asset_missing' };
+  }
+
+  // 处理 base64 数据
+  let imageData = asset.data;
+  if (imageData.startsWith('data:')) {
+    const base64Index = imageData.indexOf('base64,');
+    if (base64Index !== -1) {
+      imageData = imageData.substring(base64Index + 7);
+    }
+  }
+
+  // 如果是平铺模式，先合成平铺图
+  if (bgSpec.mode === 'tile' && bgSpec.tile) {
+    const tileResult = await composeTiledBackground(imageData, {
+      slideWidth: slideSize.width,
+      slideHeight: slideSize.height,
+      tileWidth: bgSpec.tile.width,
+      tileHeight: bgSpec.tile.height,
+      scale: bgSpec.tile.scale,
+    });
+
+    if (!tileResult.success || !tileResult.data) {
+      // 平铺失败，尝试降级为拉伸模式
+      if (bgSpec.allowFallback !== false) {
+        console.warn('[applyBackground] Tile composition failed, falling back to stretch mode');
+      } else {
+        return { applied: false, error: `background_compose_failed: ${tileResult.error}` };
+      }
+    } else {
+      imageData = tileResult.data;
+    }
+  }
+
+  // 尝试使用原生背景 API（PowerPointApi 1.10+）
+  const apiSupported = Office.context.requirements.isSetSupported('PowerPointApi', '1.10');
+
+  if (apiSupported) {
+    try {
+      const slideAny = slide as any;
+      if (slideAny.background && slideAny.background.fill) {
+        // 设置不跟随母版背景
+        slideAny.background.isMasterBackgroundFollowed = false;
+        await context.sync();
+
+        // 设置背景图片
+        const transparency = Math.max(0, Math.min(1, bgSpec.transparency ?? 0));
+        slideAny.background.fill.setPictureOrTextureFill({
+          imageBase64: imageData,
+          transparency: transparency,
+        });
+        await context.sync();
+
+        return { applied: true, method: 'background-api' };
+      }
+    } catch (error) {
+      console.warn('[applyBackground] Native API failed:', error);
+      // 降级到形状方式
+    }
+  }
+
+  // 降级：使用全幅图片形状作为背景
+  if (bgSpec.allowFallback !== false) {
+    // 检查 fill.setImage API 支持（需要 1.8+）
+    if (!Office.context.requirements.isSetSupported('PowerPointApi', '1.8')) {
+      return { applied: false, error: 'background_api_unsupported_need_1.8' };
+    }
+
+    try {
+      // 创建矩形形状并设置图片填充
+      const shape = slide.shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle, {
+        left: 0,
+        top: 0,
+        width: slideSize.width,
+        height: slideSize.height,
+      });
+
+      // 加载 fill 属性
+      shape.load(['id', 'fill']);
+      await context.sync();
+
+      // 设置图片填充
+      shape.fill.setImage(imageData);
+
+      // 移除边框线条
+      shape.lineFormat.visible = false;
+
+      await context.sync();
+
+      // 尝试将形状移到最底层（如果 API 支持）
+      try {
+        const shapeAny = shape as any;
+        if (shapeAny.zOrderPosition !== undefined) {
+          shapeAny.zOrderPosition = 0;
+          await context.sync();
+        }
+      } catch {
+        // Z-order API 不支持，忽略
+      }
+
+      return { applied: true, method: 'shape-fallback' };
+    } catch (error) {
+      return {
+        applied: false,
+        error: `background_shape_failed: ${error instanceof Error ? error.message : 'unknown'}`,
+      };
+    }
+  }
+
+  return { applied: false, error: 'background_api_unsupported' };
+}
+
+/**
+ * 设置当前幻灯片背景
+ * 独立函数，用于测试页面直接调用
+ * 需要 PowerPointApi 1.8+ 支持 fill.setImage
+ */
+export async function setSlideBackground(
+  imageData: string,
+  options?: {
+    mode?: 'stretch' | 'tile';
+    tileWidth?: number;
+    tileHeight?: number;
+    transparency?: number;
+  }
+): Promise<{ success: boolean; method?: string; error?: string }> {
+  // 检查 API 版本支持（fill.setImage 需要 1.8+）
+  if (!Office.context.requirements.isSetSupported('PowerPointApi', '1.8')) {
+    return {
+      success: false,
+      error: '您的 PowerPoint 版本不支持背景设置功能（需要 PowerPointApi 1.8+）',
+    };
+  }
+
+  return new Promise((resolve) => {
+    PowerPoint.run(async (context) => {
+      try {
+        const selectedSlides = context.presentation.getSelectedSlides();
+        selectedSlides.load('items');
+        await context.sync();
+
+        if (selectedSlides.items.length === 0) {
+          resolve({ success: false, error: '请先选择一个幻灯片' });
+          return;
+        }
+
+        const slide = selectedSlides.items[0];
+
+        // 处理 base64 数据
+        let processedImageData = imageData;
+        if (processedImageData.startsWith('data:')) {
+          const base64Index = processedImageData.indexOf('base64,');
+          if (base64Index !== -1) {
+            processedImageData = processedImageData.substring(base64Index + 7);
+          }
+        }
+
+        const slideSize = { width: 960, height: 540 };
+
+        // 如果是平铺模式
+        if (options?.mode === 'tile' && options.tileWidth && options.tileHeight) {
+          // 获取原图尺寸作为默认平铺尺寸
+          const dimensions = await getImageDimensions(processedImageData);
+          const tileWidth = options.tileWidth || dimensions?.width || 100;
+          const tileHeight = options.tileHeight || dimensions?.height || 100;
+
+          const tileResult = await composeTiledBackground(processedImageData, {
+            slideWidth: slideSize.width,
+            slideHeight: slideSize.height,
+            tileWidth,
+            tileHeight,
+          });
+
+          if (tileResult.success && tileResult.data) {
+            processedImageData = tileResult.data;
+          } else {
+            console.warn('[setSlideBackground] Tile failed, using stretch mode');
+          }
+        }
+
+        // 尝试原生背景 API（需要 1.10+）
+        const bgApiSupported = Office.context.requirements.isSetSupported('PowerPointApi', '1.10');
+
+        if (bgApiSupported) {
+          try {
+            const slideAny = slide as any;
+            if (slideAny.background && slideAny.background.fill) {
+              slideAny.background.isMasterBackgroundFollowed = false;
+              await context.sync();
+
+              const transparency = Math.max(0, Math.min(1, options?.transparency ?? 0));
+              slideAny.background.fill.setPictureOrTextureFill({
+                imageBase64: processedImageData,
+                transparency,
+              });
+              await context.sync();
+
+              resolve({ success: true, method: 'background-api' });
+              return;
+            }
+          } catch (error) {
+            console.warn('[setSlideBackground] Native API failed:', error);
+          }
+        }
+
+        // 降级：使用全幅图片形状（需要 1.8+ 的 fill.setImage）
+        const shape = slide.shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle, {
+          left: 0,
+          top: 0,
+          width: slideSize.width,
+          height: slideSize.height,
+        });
+
+        // 加载 fill 属性
+        shape.load(['id', 'fill']);
+        await context.sync();
+
+        // 设置图片填充
+        shape.fill.setImage(processedImageData);
+
+        // 移除边框线条
+        shape.lineFormat.visible = false;
+
+        await context.sync();
+
+        resolve({ success: true, method: 'shape-fallback' });
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : '设置背景失败';
+        console.error('[setSlideBackground] Error:', error);
+        resolve({
+          success: false,
+          error: errorMsg,
+        });
+      }
+    }).catch((error) => {
+      resolve({
+        success: false,
+        error: error instanceof Error ? error.message : 'PowerPoint API 调用失败',
+      });
+    });
+  });
+}
+
+/**
+ * 在指定位置插入文本框
+ * 独立函数，用于测试页面直接调用
+ */
+export async function insertTextAtPosition(
+  text: string,
+  bounds: Bounds,
+  style?: TextStyle
+): Promise<{ success: boolean; shapeId?: string; error?: string }> {
+  return new Promise((resolve) => {
+    PowerPoint.run(async (context) => {
+      try {
+        const selectedSlides = context.presentation.getSelectedSlides();
+        selectedSlides.load('items');
+        await context.sync();
+
+        if (selectedSlides.items.length === 0) {
+          resolve({ success: false, error: '请先选择一个幻灯片' });
+          return;
+        }
+
+        const slide = selectedSlides.items[0];
+
+        const shape = slide.shapes.addTextBox(text, {
+          left: bounds.x,
+          top: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        });
+
+        shape.load(['id', 'textFrame']);
+        await context.sync();
+
+        // 应用样式
+        if (style) {
+          await applyTextStyle(context, shape, style);
+        }
+
+        resolve({ success: true, shapeId: shape.id });
+      } catch (error) {
+        resolve({
+          success: false,
+          error: error instanceof Error ? error.message : '插入文本失败',
+        });
+      }
+    }).catch((error) => {
+      resolve({
+        success: false,
+        error: error instanceof Error ? error.message : 'PowerPoint API 调用失败',
+      });
+    });
   });
 }

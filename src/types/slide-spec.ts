@@ -11,6 +11,25 @@ export type TextAlign = 'left' | 'center' | 'right' | 'justify';
 // 图片适配策略
 export type ImageFit = 'contain' | 'cover' | 'fill';
 
+// 背景模式
+export type BackgroundMode = 'stretch' | 'tile';
+
+// 背景平铺配置
+export interface BackgroundTileSpec {
+  width: number;
+  height: number;
+  scale?: number;
+}
+
+// 背景规格
+export interface BackgroundSpec {
+  assetId: string;
+  mode?: BackgroundMode;
+  transparency?: number; // 0..1
+  tile?: BackgroundTileSpec;
+  allowFallback?: boolean;
+}
+
 // 布局模板类型
 export type LayoutTemplate =
   | 'title-only'
@@ -121,6 +140,7 @@ export interface SlideSpec {
   blocks: SlideBlockSpec[];
   theme?: ThemeSpec;
   assets?: ImageAsset[];
+  background?: BackgroundSpec;
   speakerNotes?: string;
   metadata?: {
     requestId?: string;
@@ -184,11 +204,9 @@ export interface ApplySlideSpecResult {
   error?: string;
 }
 
-// 图片生成配置
+// 图片生成配置（复用 AI 连接的 API Key 和 baseUrl）
 export interface ImageGenConfig {
   enabled: boolean;
-  apiKey: string;
-  baseUrl: string;
   model: string;
   defaultSize: '512x512' | '1024x1024';
 }
