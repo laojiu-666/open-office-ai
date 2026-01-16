@@ -28,6 +28,18 @@ export function isSlideGenerationRequest(content: string): boolean {
     '做一张',
     '创建一页',
     '新建一页',
+    // 背景图相关
+    '背景图',
+    '加背景',
+    '添加背景',
+    '换背景',
+    '设置背景',
+    '加图片',
+    '添加图片',
+    '插入图片',
+    '配图',
+    '加个图',
+    '放张图',
   ];
 
   const lowerContent = content.toLowerCase();
@@ -44,6 +56,12 @@ export function extractSlideSpec(response: string): SlideSpec | null {
     try {
       const parsed = JSON.parse(jsonBlockMatch[1].trim());
       console.log('[extractSlideSpec] Parsed from code block:', parsed);
+
+      // 检查是否为单独的图片块
+      if (isSingleImageBlock(parsed)) {
+        return wrapImageBlockAsSlideSpec(parsed);
+      }
+
       if (isValidSlideSpec(parsed)) {
         return normalizeSlideSpec(parsed);
       }
@@ -57,6 +75,12 @@ export function extractSlideSpec(response: string): SlideSpec | null {
   try {
     const parsed = JSON.parse(response.trim());
     console.log('[extractSlideSpec] Parsed directly:', parsed);
+
+    // 检查是否为单独的图片块
+    if (isSingleImageBlock(parsed)) {
+      return wrapImageBlockAsSlideSpec(parsed);
+    }
+
     if (isValidSlideSpec(parsed)) {
       return normalizeSlideSpec(parsed);
     }
@@ -79,8 +103,54 @@ export function extractSlideSpec(response: string): SlideSpec | null {
     }
   }
 
+  // 尝试匹配单独的图片块 JSON
+  const imageBlockMatch = response.match(/\{[\s\S]*"kind"\s*:\s*"image"[\s\S]*"prompt"[\s\S]*\}/);
+  if (imageBlockMatch) {
+    try {
+      const parsed = JSON.parse(imageBlockMatch[0]);
+      console.log('[extractSlideSpec] Parsed image block from regex:', parsed);
+      if (isSingleImageBlock(parsed)) {
+        return wrapImageBlockAsSlideSpec(parsed);
+      }
+    } catch (e) {
+      console.log('[extractSlideSpec] Failed to parse image block:', e);
+    }
+  }
+
   console.log('[extractSlideSpec] No valid SlideSpec found');
   return null;
+}
+
+// 检查是否为单独的图片块
+function isSingleImageBlock(obj: unknown): obj is { kind: 'image'; slotId: string; prompt: string } {
+  if (!obj || typeof obj !== 'object') return false;
+  const block = obj as Record<string, unknown>;
+  return block.kind === 'image' && typeof block.slotId === 'string' && typeof block.prompt === 'string';
+}
+
+// 将单独的图片块包装为完整的 SlideSpec
+function wrapImageBlockAsSlideSpec(block: { kind: 'image'; slotId: string; prompt: string }): SlideSpec {
+  console.log('[wrapImageBlockAsSlideSpec] Wrapping image block:', block);
+  return {
+    version: '1.0',
+    layout: {
+      template: 'image-caption',
+      slots: [],
+    },
+    blocks: [
+      {
+        kind: 'image',
+        slotId: block.slotId || 'image',
+        prompt: block.prompt,
+        assetId: `asset_${crypto.randomUUID().substring(0, 8)}`,
+      },
+    ],
+    assets: [],
+    metadata: {
+      requestId: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    },
+  };
 }
 
 // 验证是否为有效的 SlideSpec
