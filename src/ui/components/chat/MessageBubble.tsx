@@ -6,6 +6,9 @@ import { getPowerPointAdapter } from '@adapters/powerpoint';
 import { aiEffects, shadows, createTransition, animation } from '@ui/styles/designTokens';
 import { SlideGenerationCard } from './cards/SlideGenerationCard';
 import { useSlideGenerator, type GenerationStep } from '@ui/hooks/useSlideGenerator';
+import { ToolExecutionCard } from './ToolExecutionCard';
+import { MediaResultCard } from './cards/MediaResultCard';
+import type { GenerationToolResult } from '@/types';
 
 const useStyles = makeStyles({
   container: {
@@ -155,8 +158,24 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
   const styles = useStyles();
   const isUser = message.role === 'user';
+  const isTool = message.role === 'tool';
   const isStreaming = message.status === 'streaming';
   const isError = message.status === 'error';
+
+  // 如果是工具消息，渲染工具执行卡片
+  if (isTool) {
+    return (
+      <div className={`${styles.container} ${styles.assistantContainer}`}>
+        <ToolExecutionCard
+          toolName={message.metadata?.toolName || 'Unknown Tool'}
+          status={message.status === 'error' ? 'error' : message.status === 'pending' ? 'pending' : 'success'}
+          result={message.status !== 'error' ? message.metadata?.toolResult : undefined}
+          errorMessage={message.status === 'error' ? message.content : undefined}
+          parsingError={message.metadata?.parsingError}
+        />
+      </div>
+    );
+  }
 
   // 幻灯片生成状态
   const [isGeneratingSlide, setIsGeneratingSlide] = useState(false);
@@ -259,6 +278,37 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <span className={styles.streamingIndicator} />
         )}
       </div>
+
+      {/* 工具执行结果展示 */}
+      {!isUser && message.metadata?.toolResult && (
+        <>
+          {/* 图片生成结果 */}
+          {(message.metadata.toolResult as any)?.data?.type === 'image' && (
+            <div style={{ marginTop: '12px' }}>
+              <MediaResultCard
+                type="image"
+                content={(message.metadata.toolResult as any).data.content}
+                metadata={(message.metadata.toolResult as any).data.metadata}
+                onInsert={() => {
+                  // TODO: 实现插入到幻灯片的逻辑
+                  console.log('Insert image to slide');
+                }}
+              />
+            </div>
+          )}
+
+          {/* 视频生成结果 */}
+          {(message.metadata.toolResult as any)?.data?.type === 'video' && (
+            <div style={{ marginTop: '12px' }}>
+              <MediaResultCard
+                type="video"
+                content={(message.metadata.toolResult as any).data.content}
+                metadata={(message.metadata.toolResult as any).data.metadata}
+              />
+            </div>
+          )}
+        </>
+      )}
 
       {/* SlideSpec 生成卡片 */}
       {!isUser && message.slideSpec && slideGenStep !== 'idle' && (

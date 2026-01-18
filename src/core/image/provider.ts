@@ -1,12 +1,36 @@
 import type { ImageGenConfig, ImageGenRequest, ImageGenResponse } from './types';
-import type { AIConnection } from '@/types';
+import type { AIConnection, GenerationProfile } from '@/types';
 import { normalizeBaseUrl } from '@core/llm/presets';
+import { CapabilityRouter } from '@core/capability-router';
 
 /**
  * 图片生成服务
  * 支持 OpenAI DALL-E 兼容的 API
  * 复用 AI 连接的 API Key 和 baseUrl
  */
+
+/**
+ * 检测是否需要使用代理
+ * 在开发环境且目标是火山引擎 API 时使用代理避免 CORS
+ */
+function shouldUseProxy(baseUrl: string): boolean {
+  const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isVolcesAPI = baseUrl.includes('volces.com') || baseUrl.includes('volcengine.com');
+  return isDev && isVolcesAPI;
+}
+
+/**
+ * 构建 API URL，在需要时使用代理
+ */
+function buildApiUrl(baseUrl: string, endpoint: string): string {
+  if (shouldUseProxy(baseUrl)) {
+    // 使用本地代理，避免 CORS 问题
+    // 注意：代理会将 /api-proxy 替换为目标服务器的根路径
+    return `/api-proxy${endpoint}`;
+  }
+  // 直接使用 baseUrl + endpoint
+  return `${baseUrl}${endpoint}`;
+}
 
 export interface ImageGenerationError {
   code: 'config_missing' | 'auth_failed' | 'rate_limited' | 'network_error' | 'generation_failed';
@@ -36,7 +60,10 @@ export class ImageGenerationProvider {
     }
 
     // 使用连接配置的图片模型，如果没有则使用默认配置
-    const imageModel = this.connection.imageModel || this.config.model;
+    const imageModel =
+      this.connection.capabilities?.image?.model ||
+      this.connection.imageModel ||
+      this.config.model;
     if (!imageModel) {
       throw this.createError('config_missing', '当前连接未配置图片生成模型');
     }
@@ -44,9 +71,26 @@ export class ImageGenerationProvider {
     const size = request.size || this.config.defaultSize;
     const [width, height] = size.split('x').map(Number);
 
-    // 构建 API URL，使用连接的 baseUrl
-    const baseUrl = normalizeBaseUrl(this.connection.baseUrl, this.connection.providerId);
-    const apiUrl = `${baseUrl}/images/generations`;
+    // 构建 API URL
+    const normalizedBase = normalizeBaseUrl(this.connection.baseUrl, this.connection.providerId);
+
+    // 根据 providerId 决定使用哪个路径
+    let endpoint = '/v1/images/generations';
+
+    // 豆包使用不同的 API 端点
+    if (this.connection.providerId === 'doubao') {
+      endpoint = '/api/v3/images/generations';
+    }
+
+    // 构建完整 URL
+    let apiUrl: string;
+    if (shouldUseProxy(this.connection.baseUrl)) {
+      // 使用代理：/api-proxy + endpoint
+      apiUrl = `/api-proxy${endpoint}`;
+    } else {
+      // 直接调用：normalizedBase + endpoint
+      apiUrl = `${normalizedBase}${endpoint}`;
+    }
 
     try {
       const response = await fetch(apiUrl, {
@@ -147,6 +191,21 @@ export class ImageGenerationProvider {
 export function createImageGenerationProvider(
   config: ImageGenConfig,
   connection: AIConnection | null
+): ImageGenerationProvider;
+export function createImageGenerationProvider(
+  config: ImageGenConfig,
+  connections: AIConnection[],
+  generationProfile?: GenerationProfile
+): ImageGenerationProvider;
+export function createImageGenerationProvider(
+  config: ImageGenConfig,
+  connectionOrConnections: AIConnection | AIConnection[] | null,
+  generationProfile?: GenerationProfile
 ): ImageGenerationProvider {
-  return new ImageGenerationProvider(config, connection);
+  if (Array.isArray(connectionOrConnections)) {
+    const router = new CapabilityRouter(connectionOrConnections, generationProfile);
+    const connection = router.getImageConnection();
+    return new ImageGenerationProvider(config, connection);
+  }
+  return new ImageGenerationProvider(config, connectionOrConnections);
 }

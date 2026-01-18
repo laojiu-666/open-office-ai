@@ -8,11 +8,13 @@ import {
   PlugConnected24Regular,
   ChevronRight20Regular,
   CodeRegular,
+  BrainCircuit24Regular,
 } from '@fluentui/react-icons';
 import { useAppStore } from '@ui/store/appStore';
 import { shadows, layoutDimensions, createTransition } from '@ui/styles/designTokens';
 import { ConnectionsPage } from './pages';
 import { DeveloperPage } from '../developer';
+import { GenerationProfileSettings } from './GenerationProfileSettings';
 
 const useStyles = makeStyles({
   container: {
@@ -72,6 +74,10 @@ const useStyles = makeStyles({
   },
   menuIconConnections: {
     background: 'linear-gradient(135deg, #0078D4 0%, #106EBE 100%)',
+    color: 'white',
+  },
+  menuIconProfile: {
+    background: 'linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)',
     color: 'white',
   },
   menuIconDeveloper: {
@@ -155,6 +161,13 @@ function SettingsMain() {
             onClick={() => setSettingsPage('connections')}
           />
           <MenuItem
+            icon={<BrainCircuit24Regular />}
+            iconClass={styles.menuIconProfile}
+            title="生成能力"
+            description="配置文本、图片和视频生成的默认模型"
+            onClick={() => setSettingsPage('profile')}
+          />
+          <MenuItem
             icon={<CodeRegular />}
             iconClass={styles.menuIconDeveloper}
             title="开发者工具"
@@ -183,6 +196,8 @@ export function SettingsView() {
   switch (settingsPage) {
     case 'connections':
       return <ConnectionsPage />;
+    case 'profile':
+      return <GenerationProfileSettings />;
     case 'developer':
       return <DeveloperPage />;
     default:

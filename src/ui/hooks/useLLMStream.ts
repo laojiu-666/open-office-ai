@@ -8,6 +8,20 @@ import {
   getSlideSpecSystemPrompt,
 } from '@core/llm/response-parser';
 import type { LLMStreamController, ChatMessage, SlideSpec } from '@/types';
+import { getToolRegistry } from '@core/tools/registry';
+import { registerPPTTools } from '@core/tools/ppt-tools';
+import { registerGenerationTools } from '@core/tools/generation-tools';
+
+// 初始化工具注册表（只执行一次）
+let toolsInitialized = false;
+function initializeTools() {
+  if (toolsInitialized) return;
+  const registry = getToolRegistry();
+  registerPPTTools(registry);
+  registerGenerationTools(registry);
+  toolsInitialized = true;
+  console.log('[useLLMStream] Tools registered:', registry.list());
+}
 
 // 模型上下文窗口配置（tokens）
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
@@ -30,23 +44,6 @@ const CONTEXT_USAGE_RATIO = 0.7;
 const SYSTEM_PROMPT_RESERVE = 500;
 // 文档上下文预留 tokens
 const DOC_CONTEXT_RESERVE = 1500;
-
-/**
- * 检测是否为图片生成请求
- */
-function isImageGenerationRequest(content: string): boolean {
-  const imageKeywords = [
-    '生成图片', '生成图像', '生成一张图', '生成一幅图',
-    '画一张', '画一幅', '画个', '画一个',
-    '绘制', '绘画',
-    '创建图片', '创建图像',
-    '做一张图', '做张图',
-    '配图', '插图',
-    'generate image', 'create image', 'draw',
-  ];
-  const lowerContent = content.toLowerCase();
-  return imageKeywords.some(keyword => lowerContent.includes(keyword.toLowerCase()));
-}
 
 /**
  * 估算文本的 token 数量
@@ -104,8 +101,13 @@ function buildHistoryMessagesWithBudget(
 }
 
 export function useLLMStream() {
-  const { getActiveConnection, activeProviderId, providers, messages: historyMessages, addMessage, updateMessage, setStreaming, imageGenConfig } = useAppStore();
+  const { getActiveConnection, activeProviderId, providers, messages: historyMessages, addMessage, updateMessage, setStreaming, imageGenConfig, maxToolCallDepth, addToolLog } = useAppStore();
   const controllerRef = useRef<LLMStreamController | null>(null);
+
+  // 初始化工具
+  useEffect(() => {
+    initializeTools();
+  }, []);
 
   // 组件卸载时清理流式请求
   useEffect(() => {
@@ -150,38 +152,6 @@ export function useLLMStream() {
         return;
       }
 
-      // 检测是否为图片生成请求
-      const isImageRequest = isImageGenerationRequest(userContent);
-      const canGenerateImage = !!(activeConnection?.imageModel);
-
-      // 如果是图片生成请求且支持生图
-      if (isImageRequest && canGenerateImage) {
-        await handleImageGeneration(userContent, activeConnection);
-        return;
-      }
-
-      // 如果是图片生成请求但不支持生图，提示用户
-      if (isImageRequest && !canGenerateImage) {
-        const userMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: userContent,
-          timestamp: Date.now(),
-          status: 'completed',
-        };
-        addMessage(userMessage);
-
-        const errorMessage: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: '当前连接未配置图片生成模型。请在设置中编辑连接，添加图片模型（如 dall-e-3）。',
-          timestamp: Date.now(),
-          status: 'error',
-        };
-        addMessage(errorMessage);
-        return;
-      }
-
       // 取消之前的流式请求
       if (controllerRef.current) {
         controllerRef.current.abort();
@@ -207,7 +177,7 @@ export function useLLMStream() {
       addMessage(userMessage);
 
       // Add assistant message placeholder
-      const assistantMessage: ChatMessage = {
+      let assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
         content: '',
@@ -226,11 +196,27 @@ export function useLLMStream() {
           theme: context?.theme,
         });
       } else {
-        // 普通对话系统提示
-        systemPrompt = `你是一个专业的 Office 文档助手。帮助用户改写、生成、优化文档内容。
+        // 普通对话系统提示 + 工具说明
+        systemPrompt = `你是一个专业的 Office 文档助手。
+
+你可以使用以下工具来完成任务：
+- generate_text: 生成文本内容（回答问题、改写、翻译、总结等）
+- generate_image: 生成图片（插图、配图、视觉内容）
+- generate_video: 生成视频（动画、演示）
+- create_slide: 创建幻灯片
+- generate_and_insert_image: 生成图片并插入到当前幻灯片
+- 其他 PowerPoint 操作工具
+
+根据用户需求自动选择合适的工具。例如：
+- "帮我改写这段话" → 使用 generate_text
+- "画一张日落的图" → 使用 generate_image
+- "做一个产品演示视频" → 使用 generate_video
+- "创建一个关于AI的幻灯片，配上图片" → 使用 create_slide（包含图片）
+
 ${context?.selectedText ? `\n用户当前选中的文本：\n"""${context.selectedText}"""` : ''}
 ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` : ''}
-请直接输出结果，不要添加额外的解释。`;
+
+请根据用户意图选择最合适的工具，直接输出结果，不要添加额外的解释。`;
       }
 
       // 计算历史消息的 token 预算
@@ -272,81 +258,205 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
         return patterns.some((p) => lowerMsg.includes(p));
       };
 
-      // 执行流式请求（支持重试）
+      // 获取工具注册表
+      const toolRegistry = getToolRegistry();
+      const tools = toolRegistry.getToolDefinitions();
+
+      // 执行流式请求（支持重试和递归多轮对话）
       const executeStream = async (
-        msgs: typeof messages,
-        retryCount = 0
+        msgs: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; toolCalls?: any; toolCallId?: string }>,
+        retryCount = 0,
+        depth = 0
       ): Promise<void> => {
         try {
-          controllerRef.current = await provider.stream(
+          // 检查递归深度限制
+          if (depth >= maxToolCallDepth) {
+            const warningMessage: ChatMessage = {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: `已达到最大工具调用深度限制（${maxToolCallDepth}层）`,
+              timestamp: Date.now(),
+              status: 'error',
+            };
+            addMessage(warningMessage);
+            setStreaming(false);
+            return;
+          }
+
+          // LLM 调用：可能返回 tool_calls
+          const response = await provider.send(
             {
               model: config.model,
               messages: msgs,
               temperature: 0.7,
               maxTokens: 4096,
+              tools,
+              toolChoice: 'auto',
             },
-            {
-              onToken: (chunk) => {
-                if (chunk.contentDelta) {
-                  const delta = chunk.contentDelta;
-                  fullResponse += delta;
-                  useAppStore.setState((state) => ({
-                    messages: state.messages.map((m) =>
-                      m.id === assistantMessage.id
-                        ? { ...m, content: m.content + delta }
-                        : m
-                    ),
-                  }));
-                }
-              },
-              onError: async (error) => {
-                // 检测上下文超限错误，尝试自动重试
-                if (isContextLengthError(error.message) && retryCount < 2) {
-                  // 进一步缩减历史消息（每次减半）
-                  const reducedBudget = Math.floor(historyBudget / Math.pow(2, retryCount + 1));
-                  const reducedHistory = buildHistoryMessagesWithBudget(
-                    historyMessages,
-                    reducedBudget
-                  );
-                  const reducedMessages = [
-                    { role: 'system' as const, content: systemPrompt },
-                    ...reducedHistory,
-                    { role: 'user' as const, content: userContent },
-                  ];
-                  // 重置响应内容
-                  fullResponse = '';
-                  updateMessage(assistantMessage.id, { content: '' });
-                  // 重试
-                  await executeStream(reducedMessages, retryCount + 1);
-                } else {
-                  updateMessage(assistantMessage.id, {
-                    status: 'error',
-                    content: `错误: ${error.message}`,
-                  });
-                  setStreaming(false);
-                }
-              },
-              onComplete: () => {
-                // 尝试从响应中提取 SlideSpec
-                // 如果是幻灯片请求，或者响应看起来包含 JSON，都尝试解析
-                let slideSpec: SlideSpec | null = null;
-                const looksLikeJson = fullResponse.includes('"blocks"') || fullResponse.includes('"kind"');
-
-                if (isSlideRequest || looksLikeJson) {
-                  slideSpec = extractSlideSpec(fullResponse);
-                  console.log('[useLLMStream] isSlideRequest:', isSlideRequest, 'looksLikeJson:', looksLikeJson, 'extracted slideSpec:', slideSpec);
-                }
-
-                // 更新消息状态
-                console.log('[useLLMStream] Updating message with slideSpec:', slideSpec ? 'present' : 'null');
-                updateMessage(assistantMessage.id, {
-                  status: 'completed',
-                  slideSpec: slideSpec || undefined,
-                });
-                setStreaming(false);
-              },
-            }
+            undefined
           );
+
+          fullResponse = response.content;
+
+          // 情况 1：LLM 请求调用工具
+          if (response.toolCalls && response.toolCalls.length > 0) {
+            console.log('[useLLMStream] Tool calls detected:', response.toolCalls);
+
+            // 更新助手消息
+            updateMessage(assistantMessage.id, {
+              status: 'completed',
+              content: response.content || '正在执行操作...',
+              metadata: { toolCalls: response.toolCalls },
+            });
+
+            // 执行所有工具调用
+            const toolMessages: any[] = [];
+            for (const toolCall of response.toolCalls) {
+              // 添加工具执行消息（pending）
+              const toolMsgId = crypto.randomUUID();
+              const toolMessage: ChatMessage = {
+                id: toolMsgId,
+                role: 'tool',
+                content: '执行中...',
+                timestamp: Date.now(),
+                status: 'pending',
+                metadata: {
+                  toolName: toolCall.name,
+                  toolCallId: toolCall.id,
+                  parsingError: toolCall.parsingError,
+                },
+              };
+              addMessage(toolMessage);
+
+              const startTime = Date.now();
+
+              try {
+                // 执行工具（传递 parsingError）
+                const result = await toolRegistry.execute(
+                  toolCall.name,
+                  toolCall.arguments,
+                  { parsingError: toolCall.parsingError }
+                );
+
+                const duration = Date.now() - startTime;
+
+                // 更新工具消息为成功/失败
+                updateMessage(toolMsgId, {
+                  content: result.success ? JSON.stringify(result.data) : result.error || '执行失败',
+                  status: result.success ? 'completed' : 'error',
+                  metadata: {
+                    toolName: toolCall.name,
+                    toolCallId: toolCall.id,
+                    toolResult: result,
+                    parsingError: toolCall.parsingError,
+                  },
+                });
+
+                // 记录工具调用历史
+                addToolLog({
+                  id: crypto.randomUUID(),
+                  timestamp: Date.now(),
+                  toolName: toolCall.name,
+                  toolCallId: toolCall.id,
+                  arguments: toolCall.arguments,
+                  success: result.success,
+                  durationMs: duration,
+                  result: result.success ? result.data : undefined,
+                  error: result.success ? undefined : result.error,
+                  errorCode: result.errorCode,
+                  errorDetails: result.errorDetails,
+                  parsingError: toolCall.parsingError,
+                });
+
+                // 收集工具结果用于下一次 LLM 调用
+                toolMessages.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: JSON.stringify(result),
+                });
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : '未知错误';
+                const duration = Date.now() - startTime;
+
+                updateMessage(toolMsgId, {
+                  content: errorMsg,
+                  status: 'error',
+                  metadata: {
+                    toolName: toolCall.name,
+                    toolCallId: toolCall.id,
+                    parsingError: toolCall.parsingError,
+                  },
+                });
+
+                // 记录失败的工具调用
+                addToolLog({
+                  id: crypto.randomUUID(),
+                  timestamp: Date.now(),
+                  toolName: toolCall.name,
+                  toolCallId: toolCall.id,
+                  arguments: toolCall.arguments,
+                  success: false,
+                  durationMs: duration,
+                  error: errorMsg,
+                  errorCode: 'EXECUTION_ERROR',
+                  parsingError: toolCall.parsingError,
+                });
+
+                toolMessages.push({
+                  role: 'tool',
+                  tool_call_id: toolCall.id,
+                  content: JSON.stringify({ success: false, error: errorMsg }),
+                });
+              }
+            }
+
+            // 构建下一轮消息（包含工具结果）
+            const nextMessages = [
+              ...msgs,
+              {
+                role: 'assistant' as const,
+                content: response.content || '',
+                toolCalls: response.toolCalls,
+              },
+              ...toolMessages.map((tm) => ({
+                role: 'tool' as const,
+                content: tm.content,
+                toolCallId: tm.tool_call_id,
+              })),
+            ];
+
+            // 创建新的助手消息用于下一轮
+            const nextAssistantMessage: ChatMessage = {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: '',
+              timestamp: Date.now(),
+              status: 'streaming',
+            };
+            addMessage(nextAssistantMessage);
+
+            // 更新当前助手消息 ID 并递归调用
+            assistantMessage = nextAssistantMessage;
+            await executeStream(nextMessages, 0, depth + 1);
+            return;
+          }
+
+          // 情况 2：普通文本响应（不需要工具）
+          // 尝试从响应中提取 SlideSpec
+          let slideSpec: SlideSpec | null = null;
+          const looksLikeJson = fullResponse.includes('"blocks"') || fullResponse.includes('"kind"');
+
+          if (isSlideRequest || looksLikeJson) {
+            slideSpec = extractSlideSpec(fullResponse);
+            console.log('[useLLMStream] extracted slideSpec:', slideSpec);
+          }
+
+          updateMessage(assistantMessage.id, {
+            status: 'completed',
+            content: fullResponse,
+            slideSpec: slideSpec || undefined,
+          });
+          setStreaming(false);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : '未知错误';
           // 检测上下文超限错误，尝试自动重试
@@ -377,52 +487,6 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
       await executeStream(messages);
     },
     [getActiveConnection, activeProviderId, providers, historyMessages, addMessage, updateMessage, setStreaming, imageGenConfig]
-  );
-
-  // 处理图片生成请求
-  const handleImageGeneration = useCallback(
-    async (userContent: string, connection: NonNullable<ReturnType<typeof getActiveConnection>>) => {
-      // 添加用户消息
-      const userMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: userContent,
-        timestamp: Date.now(),
-        status: 'completed',
-      };
-      addMessage(userMessage);
-
-      // 添加助手消息占位
-      const assistantMessage: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: '正在生成图片...',
-        timestamp: Date.now(),
-        status: 'streaming',
-      };
-      addMessage(assistantMessage);
-      setStreaming(true);
-
-      try {
-        const imageProvider = createImageGenerationProvider(imageGenConfig, connection);
-        const result = await imageProvider.generate({ prompt: userContent });
-
-        // 更新消息，包含图片
-        updateMessage(assistantMessage.id, {
-          status: 'completed',
-          content: `![生成的图片](data:image/${result.format};base64,${result.data})\n\n图片已生成（${result.width}x${result.height}）`,
-        });
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : '图片生成失败';
-        updateMessage(assistantMessage.id, {
-          status: 'error',
-          content: `图片生成失败: ${errorMsg}`,
-        });
-      } finally {
-        setStreaming(false);
-      }
-    },
-    [addMessage, updateMessage, setStreaming, imageGenConfig]
   );
 
   const stopStream = useCallback(() => {

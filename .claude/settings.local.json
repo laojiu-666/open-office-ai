@@ -24,7 +24,23 @@
       "mcp__desktop-commander__list_directory",
       "mcp__desktop-commander__read_file",
       "WebSearch",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(git commit:*)",
+      "Bash(npm outdated:*)",
+      "Bash(npm update)",
+      "Bash(npm run dev)",
+      "Bash(npm run validate)",
+      "Bash(del:*)",
+      "WebFetch(domain:docs.microsoft.com)",
+      "WebFetch(domain:c-rex.net)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Bash(taskkill:*)",
+      "Bash(echo \"ROLE_FILE: C:/Users/Administrator/.claude/.ccg/prompts/codex/architect.md\n\n<TASK>\nRequirements: Implement PPT Function Calling System Enhancements - Backend Tasks \\(All 6 Tasks\\)\n\nBased on the plan in .claude/plan/ppt-function-calling-enhancements.md, implement ALL backend tasks:\n\n**Task 1: Enhanced Parameter Validation Error Feedback \\(P0\\)**\n- Extend ToolCall interface in src/types/index.ts to add parsingError?: string\n- Extend ToolResult interface to add errorCode?: string and errorDetails?: unknown\n- Modify parseToolCalls in src/core/llm/openai.ts \\(lines 55-79\\): catch JSON.parse errors, store in parsingError\n- Modify execute in src/core/tools/registry.ts: check parsingError, return structured error\n\n**Task 2: Complete Multi-turn Conversation Loop \\(P0\\)**\n- Refactor executeStream in src/ui/hooks/useLLMStream.ts \\(lines 296-461\\): make recursive with depth limit\n- Add maxToolCallDepth config to src/ui/store/appStore.ts\n\n**Task 3: Verify and Optimize Fallback Logic \\(P1\\)**\n- Review src/adapters/powerpoint/slide-renderer.ts \\(lines 61-85\\)\n- Add safety checks to src/core/tools/ppt-tools.ts if needed\n\n**Task 4: Add Tool Call History \\(P2\\)**\n- Extend src/ui/store/appStore.ts: add toolHistory state, addToolLog, clearToolHistory methods\n- Modify src/ui/hooks/useLLMStream.ts to record tool calls\n\n**Task 5: Support Streaming Tool Calls \\(P2\\)**\n- Modify useLLMStream to use provider.stream\\(\\) instead of provider.send\\(\\)\n- Implement tool_calls delta accumulation\n\n**Task 6: Extend Anthropic and Gemini Providers \\(P2\\)**\n- Implement tool calling in src/core/llm/anthropic.ts\n- Implement tool calling in src/core/llm/gemini.ts\n\nContext: Retrieved from codebase via ace-tool search_context\nSESSION_ID: 019bd01f-ba64-7980-99eb-1bab7ba9c223\n</TASK>\n\nOUTPUT: Unified Diff Patch ONLY. Strictly prohibit any actual modifications.\")",
+      "Bash(C:/Users/Administrator/.claude/bin/codeagent-wrapper.exe --backend codex resume 019bd01f-ba64-7980-99eb-1bab7ba9c223 - \"F:/web/open-office-ai\")",
+      "Bash(echo \"ROLE_FILE: C:/Users/Administrator/.claude/.ccg/prompts/gemini/frontend.md\n\n<TASK>\nRequirements: Implement PPT Function Calling System Enhancements - Frontend Tasks \\(All UI Tasks\\)\n\nBased on the plan in .claude/plan/ppt-function-calling-enhancements.md, implement ALL frontend UI tasks:\n\n**Task 1: Enhanced Error Display in UI \\(P0\\)**\n- Modify src/ui/components/chat/ToolExecutionCard.tsx:\n  - Distinguish parameter parsing errors vs execution errors\n  - Display detailed error info \\(collapsible\\)\n  - Add copy error button\n- Modify src/ui/components/chat/MessageBubble.tsx for fallback warnings\n\n**Task 2: UI State Management for Multi-turn Conversation \\(P0\\)**\n- Modify src/ui/components/settings/SettingsView.tsx: add maxToolCallDepth config option\n\n**Task 4: Tool Call History UI \\(P2\\)**\n- Create src/ui/components/developer/sections/ToolHistorySection.tsx:\n  - Table: Time | Tool | Parameters | Result | Duration | Status\n  - Filtering, search, export to JSON\n- Modify src/ui/components/developer/DeveloperPage.tsx to integrate new section\n\nContext: Retrieved from codebase via ace-tool search_context\nCurrent ToolExecutionCard: lines 64-122 in src/ui/components/chat/ToolExecutionCard.tsx\nCurrent MessageBubble: lines 156-304 in src/ui/components/chat/MessageBubble.tsx\nCurrent appStore: src/ui/store/appStore.ts\nCurrent SettingsView: src/ui/components/settings/SettingsView.tsx\n\nSESSION_ID: 2be26697-247e-4824-b6f0-18b78f88cb74\n</TASK>\n\nOUTPUT: Unified Diff Patch ONLY. Strictly prohibit any actual modifications.\")",
+      "Bash(C:/Users/Administrator/.claude/bin/codeagent-wrapper.exe:*)",
+      "mcp__exa__web_search_exa"
     ]
   }
 }

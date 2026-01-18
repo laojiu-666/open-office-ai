@@ -1,6 +1,6 @@
 /**
- * 连接管理器组件
- * 使用 Accordion 按供应商分组显示连接列表
+ * 供应商配置管理器组件
+ * 使用 Accordion 按供应商分组显示配置列表
  */
 
 import React, { useState, useMemo } from 'react';
@@ -151,7 +151,7 @@ export function ConnectionManager({ onConfigureSync, showSyncButton }: Connectio
   };
 
   const handleDeleteConnection = (id: string) => {
-    if (confirm('确定要删除这个连接吗？')) {
+    if (confirm('确定要删除这个供应商配置吗？')) {
       removeConnection(id);
     }
   };
@@ -159,7 +159,7 @@ export function ConnectionManager({ onConfigureSync, showSyncButton }: Connectio
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <Text className={styles.title}>AI 连接</Text>
+        <Text className={styles.title}>供应商配置</Text>
         <div className={styles.actions}>
           {showSyncButton && onConfigureSync && (
             <Button
@@ -178,9 +178,9 @@ export function ConnectionManager({ onConfigureSync, showSyncButton }: Connectio
       {connections.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}>🔌</div>
-          <Text>还没有配置任何 AI 连接</Text>
+          <Text>还没有配置任何供应商</Text>
           <Text size={200} style={{ display: 'block', marginTop: '4px' }}>
-            点击上方按钮添加你的第一个连接
+            点击上方按钮添加你的第一个供应商配置
           </Text>
         </div>
       ) : (
@@ -188,7 +188,7 @@ export function ConnectionManager({ onConfigureSync, showSyncButton }: Connectio
           {!activeConnectionId && (
             <MessageBar intent="warning">
               <MessageBarBody>
-                请选择一个连接作为当前使用的 AI 服务
+                请选择一个供应商配置作为当前使用的 AI 服务
               </MessageBarBody>
             </MessageBar>
           )}

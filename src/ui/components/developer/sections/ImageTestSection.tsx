@@ -76,7 +76,27 @@ export function ImageTestSection({ onAddLog, disabled }: TestSectionProps) {
     reader.onload = (e) => {
       const base64 = e.target?.result as string;
       setConfig((prev) => ({ ...prev, imageData: base64 }));
-      onAddLog('info', `已加载图片: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+
+      // 诊断信息
+      const mimeMatch = base64.match(/^data:(image\/[^;]+);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'unknown';
+      const base64Data = base64.split('base64,')[1] || '';
+      const sizeKB = (file.size / 1024).toFixed(1);
+      const base64Length = base64Data.length;
+
+      onAddLog('info', `已加载图片: ${file.name}`);
+      onAddLog('info', `  - 文件大小: ${sizeKB} KB`);
+      onAddLog('info', `  - MIME 类型: ${mimeType}`);
+      onAddLog('info', `  - Base64 长度: ${base64Length} 字符`);
+
+      // 检查是否有潜在问题
+      if (file.size > 5 * 1024 * 1024) {
+        onAddLog('warning', '图片文件较大 (>5MB)，可能导致插入失败');
+      }
+
+      if (!['image/png', 'image/jpeg', 'image/jpg', 'image/gif'].includes(mimeType)) {
+        onAddLog('warning', `不常见的图片格式: ${mimeType}`);
+      }
     };
     reader.onerror = () => {
       onAddLog('error', '读取图片失败');
@@ -92,6 +112,16 @@ export function ImageTestSection({ onAddLog, disabled }: TestSectionProps) {
 
     setLoading(true);
     onAddLog('info', '开始插入图片...');
+
+    // 检查 API 支持
+    const api18Supported = Office.context.requirements.isSetSupported('PowerPointApi', '1.8');
+    if (!api18Supported) {
+      onAddLog('error', '❌ 当前 PowerPoint 版本不支持图片插入功能');
+      onAddLog('info', '📋 需要 PowerPoint API 1.8+（PowerPoint 2016 或更高版本）');
+      onAddLog('info', '💡 建议：升级到 PowerPoint 2016 或 Microsoft 365 订阅版本');
+      setLoading(false);
+      return;
+    }
 
     try {
       const result = await PowerPointTestRunner.insertImage({

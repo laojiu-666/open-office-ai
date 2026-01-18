@@ -16,10 +16,11 @@ import {
   Input,
   Label,
   Select,
+  Switch,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Add16Regular } from '@fluentui/react-icons';
+import { Add16Regular, TextDescription20Regular, Image20Regular } from '@fluentui/react-icons';
 import type { LLMProviderId, AIConnection } from '@/types';
 import { PROVIDER_PRESETS, getProviderOptions } from '@core/llm/presets';
 
@@ -56,6 +57,16 @@ const useStyles = makeStyles({
     fontSize: '12px',
     marginTop: '4px',
   },
+  sectionTitle: {
+    fontSize: '12px',
+    fontWeight: 600,
+    color: tokens.colorNeutralForeground2,
+    marginTop: '8px',
+  },
+  icon: {
+    verticalAlign: 'text-bottom',
+    marginRight: '4px',
+  },
 });
 
 interface AddConnectionDialogProps {
@@ -81,6 +92,16 @@ export function AddConnectionDialog({
   const [model, setModel] = useState('');
   const [imageModel, setImageModel] = useState('');
 
+  // 能力配置状态
+  const [capabilities, setCapabilities] = useState({
+    text: true,
+    image: false,
+  });
+  const [capabilityModels, setCapabilityModels] = useState({
+    text: '',
+    image: '',
+  });
+
   // 当编辑连接或打开对话框时，初始化表单
   useEffect(() => {
     if (editingConnection) {
@@ -90,6 +111,17 @@ export function AddConnectionDialog({
       setBaseUrl(editingConnection.baseUrl);
       setModel(editingConnection.model);
       setImageModel(editingConnection.imageModel || '');
+
+      // 初始化能力配置
+      const caps = editingConnection.capabilities;
+      setCapabilities({
+        text: true,
+        image: !!caps?.image,
+      });
+      setCapabilityModels({
+        text: caps?.text?.model || editingConnection.model,
+        image: caps?.image?.model || editingConnection.imageModel || '',
+      });
     } else if (open) {
       // 新建时使用默认值
       const preset = PROVIDER_PRESETS['openai'];
@@ -98,7 +130,9 @@ export function AddConnectionDialog({
       setApiKey('');
       setBaseUrl(preset.defaultBaseUrl);
       setModel(preset.defaultModel);
-      setImageModel('');
+      setImageModel(preset.defaultImageModel || '');
+      setCapabilities({ text: true, image: !!preset.defaultImageModel });
+      setCapabilityModels({ text: '', image: preset.defaultImageModel || '' });
     }
   }, [editingConnection, open]);
 
@@ -116,13 +150,24 @@ export function AddConnectionDialog({
   };
 
   const handleSave = () => {
+    const textModel = capabilityModels.text || model;
     const connection: Omit<AIConnection, 'id' | 'createdAt'> = {
       name: name || `${PROVIDER_PRESETS[providerId]?.label || providerId} 连接`,
       providerId,
       apiKey,
       baseUrl,
-      model,
-      ...(imageModel.trim() && { imageModel: imageModel.trim() }),
+      model: textModel,
+      // 构建 capabilities 对象
+      capabilities: {
+        text: { model: textModel },
+        ...(capabilities.image && capabilityModels.image.trim() && {
+          image: { model: capabilityModels.image.trim() }
+        }),
+      },
+      // 向后兼容
+      ...(capabilities.image && capabilityModels.image.trim() && {
+        imageModel: capabilityModels.image.trim()
+      }),
     };
     onSave(connection);
     onOpenChange(false);
@@ -136,7 +181,7 @@ export function AddConnectionDialog({
       <DialogSurface>
         <DialogBody>
           <DialogTitle>
-            {editingConnection ? '编辑连接' : '添加 AI 连接'}
+            {editingConnection ? '编辑供应商配置' : '添加供应商配置'}
           </DialogTitle>
           <DialogContent>
             <div className={styles.form}>
@@ -163,14 +208,14 @@ export function AddConnectionDialog({
                 )}
               </div>
 
-              {/* 连接名称 */}
+              {/* 配置名称 */}
               <div className={styles.field}>
-                <Label className={styles.label}>连接名称</Label>
+                <Label className={styles.label}>配置名称</Label>
                 <Input
                   className={styles.input}
                   value={name}
                   onChange={(_, data) => setName(data.value)}
-                  placeholder={`${currentPreset?.label || ''} 连接`}
+                  placeholder={`${currentPreset?.label || ''} 配置`}
                 />
               </div>
 
@@ -200,32 +245,43 @@ export function AddConnectionDialog({
                 </span>
               </div>
 
-              {/* 模型 */}
+              {/* 能力配置区域 */}
+              <div className={styles.sectionTitle}>模型能力</div>
+
+              {/* 文本生成（默认启用） */}
               <div className={styles.field}>
-                <Label className={styles.label}>文字模型</Label>
+                <Label className={styles.label}>
+                  <TextDescription20Regular className={styles.icon} />
+                  文字生成
+                </Label>
                 <Input
                   className={styles.input}
-                  value={model}
-                  onChange={(_, data) => setModel(data.value)}
+                  value={capabilityModels.text || model}
+                  onChange={(_, data) => setCapabilityModels({ ...capabilityModels, text: data.value })}
                   placeholder={currentPreset?.defaultModel}
                 />
-                <span className={styles.hint}>
-                  用于聊天和文字生成
-                </span>
               </div>
 
-              {/* 图片模型 */}
+              {/* 图片生成（默认启用） */}
               <div className={styles.field}>
-                <Label className={styles.label}>图片模型（可选）</Label>
-                <Input
-                  className={styles.input}
-                  value={imageModel}
-                  onChange={(_, data) => setImageModel(data.value)}
-                  placeholder="dall-e-3"
-                />
-                <span className={styles.hint}>
-                  用于生成图片，留空则不支持生图
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <Switch
+                    checked={capabilities.image}
+                    onChange={(_, data) => setCapabilities({ ...capabilities, image: data.checked })}
+                  />
+                  <Label className={styles.label}>
+                    <Image20Regular className={styles.icon} />
+                    图片生成
+                  </Label>
+                </div>
+                {capabilities.image && (
+                  <Input
+                    className={styles.input}
+                    value={capabilityModels.image}
+                    onChange={(_, data) => setCapabilityModels({ ...capabilityModels, image: data.value })}
+                    placeholder={currentPreset?.defaultImageModel || 'dall-e-3'}
+                  />
+                )}
               </div>
             </div>
           </DialogContent>
@@ -255,7 +311,7 @@ export function AddConnectionButton({
       icon={<Add16Regular />}
       onClick={onClick}
     >
-      添加连接
+      添加供应商
     </Button>
   );
 }

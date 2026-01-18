@@ -76,6 +76,21 @@ module.exports = {
     },
     port: 3001,
     hot: true,
+    proxy: [
+      {
+        context: ['/api-proxy'],
+        target: 'https://ark.cn-beijing.volces.com',
+        pathRewrite: { '^/api-proxy': '' },
+        changeOrigin: true,
+        secure: true,
+        onProxyReq: (proxyReq, req, res) => {
+          // 转发原始请求头
+          if (req.headers.authorization) {
+            proxyReq.setHeader('Authorization', req.headers.authorization);
+          }
+        },
+      },
+    ],
   },
   devtool: isProduction ? 'source-map' : 'eval-source-map',
 };

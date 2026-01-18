@@ -32,6 +32,11 @@
   <Permissions>ReadWriteDocument</Permissions>
 
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.1">
+        <bt:Set Name="PowerPointApi" MinVersion="1.4"/>
+      </bt:Sets>
+    </Requirements>
     <Hosts>
       <Host xsi:type="Presentation">
         <DesktopFormFactor>

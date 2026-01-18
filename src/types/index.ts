@@ -1,17 +1,45 @@
 // LLM Provider Types
 export type LLMProviderId =
   | 'openai'
-  | 'anthropic'
   | 'gemini'
-  | 'deepseek'
   | 'glm'
   | 'doubao'
-  | 'kimi'
+  | 'deepseek-janus'
+  | 'grok'
+  | 'qianfan'
+  | 'dashscope'
   | 'custom';
 
+// Tool Definition (OpenAI Function Calling format)
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, {
+      type: string;
+      description?: string;
+      enum?: string[];
+      items?: unknown;
+    }>;
+    required?: string[];
+  };
+}
+
+// Tool Call (LLM requests to execute a tool)
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  parsingError?: string;
+}
+
 export interface LLMMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+  name?: string;
 }
 
 export interface LLMRequest {
@@ -20,16 +48,20 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  tools?: ToolDefinition[];
+  toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
 }
 
 export interface LLMResponse {
   id: string;
   content: string;
-  finishReason?: 'stop' | 'length' | 'error';
+  finishReason?: 'stop' | 'length' | 'tool_calls' | 'error';
+  toolCalls?: ToolCall[];
 }
 
 export interface LLMStreamChunk {
   contentDelta?: string;
+  toolCalls?: ToolCall[];
   finishReason?: string;
 }
 
@@ -130,7 +162,8 @@ export interface AppSettings {
 // ============================================
 
 /**
- * AI 连接配置（支持多密钥）
+ * 供应商配置（支持多密钥）
+ * 别名：VendorConfig（保持向后兼容）
  */
 export interface AIConnection {
   id: string;
@@ -140,9 +173,27 @@ export interface AIConnection {
   apiKey: string;
   model: string;              // 文字生成模型
   imageModel?: string;        // 图片生成模型（可选）
+  capabilities?: {
+    text?: { model: string };
+    image?: { model: string };
+  };
   createdAt: number;
   lastUsedAt?: number;
   disabled?: boolean;
+}
+
+/**
+ * 供应商配置类型别名
+ */
+export type VendorConfig = AIConnection;
+
+/**
+ * 多模态生成配置
+ */
+export interface GenerationProfile {
+  mode: 'auto' | 'manual';
+  textProvider?: string;
+  imageProvider?: string;
 }
 
 /**
@@ -153,8 +204,10 @@ export interface ProviderPreset {
   label: string;
   defaultBaseUrl: string;
   defaultModel: string;
+  defaultImageModel?: string; // 默认图片生成模型
   apiPathSuffix: string; // 如 '/v1' 或 ''
   isOpenAICompatible: boolean;
+  capabilities: ('text' | 'image')[]; // 支持的能力
 }
 
 /**
@@ -216,18 +269,165 @@ export interface SyncSnapshot {
 export interface VaultPayload {
   connections: AIConnection[];
   activeConnectionId: string | null;
+  generationProfile?: GenerationProfile;
   imageGenConfig?: import('../core/image/types').ImageGenConfig;
 }
 
 // Chat Types
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
   timestamp: number;
   status: 'pending' | 'streaming' | 'completed' | 'error';
   context?: string;
   slideSpec?: import('./slide-spec').SlideSpec; // 幻灯片生成规格
+  metadata?: {
+    toolName?: string;
+    toolCallId?: string;
+    toolCalls?: ToolCall[];
+    toolResult?: unknown;
+    parsingError?: string;
+    fallbackWarning?: string;
+  };
+}
+
+// Tool History Log
+export interface ToolLog {
+  id: string;
+  timestamp: number;
+  toolName: string;
+  toolCallId: string;
+  arguments: Record<string, unknown>;
+  success: boolean;
+  durationMs: number;
+  result?: unknown;
+  error?: string;
+  errorCode?: string;
+  errorDetails?: unknown;
+  parsingError?: string;
+}
+
+// Generation Tool Result
+export interface GenerationToolResult {
+  type: 'text' | 'image';
+  content: string;  // 文本内容或 base64 数据
+  metadata?: {
+    provider?: string;
+    model?: string;
+    width?: number;
+    height?: number;
+    format?: string;
+  };
+}
+
+// ============================================
+// 供应商适配器类型定义
+// ============================================
+
+/**
+ * 供应商能力类型
+ */
+export type ProviderCapability = 'text' | 'image';
+
+/**
+ * 统一文本请求
+ */
+export interface UnifiedTextRequest {
+  prompt: string;
+  images?: UnifiedImageInput[];
+  options?: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+  };
+}
+
+/**
+ * 统一图片请求
+ */
+export interface UnifiedImageRequest {
+  prompt: string;
+  size?: '512x512' | '1024x1024' | '2048x2048';
+  style?: 'photorealistic' | 'illustration' | 'flat';
+}
+
+/**
+ * 统一图片输入
+ */
+export interface UnifiedImageInput {
+  type: 'url' | 'base64';
+  data: string;
+  mediaType?: string;
+}
+
+/**
+ * 统一文本响应
+ */
+export interface UnifiedTextResponse {
+  text: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+  raw?: unknown;
+}
+
+/**
+ * 统一图片响应
+ */
+export interface UnifiedImageResponse {
+  images: Array<{ data: string; format: 'png' | 'jpeg'; width: number; height: number }>;
+  raw?: unknown;
+}
+
+/**
+ * HTTP 请求
+ */
+export interface HttpRequest {
+  url: string;
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  headers: Record<string, string>;
+  body?: unknown;
+}
+
+/**
+ * HTTP 响应
+ */
+export interface HttpResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+/**
+ * HTTP 错误
+ */
+export interface HttpError {
+  status?: number;
+  message: string;
+  code?: string;
+  details?: unknown;
+}
+
+/**
+ * 供应商错误码
+ */
+export type ProviderErrorCode =
+  | 'auth_invalid'
+  | 'quota_exceeded'
+  | 'rate_limited'
+  | 'input_invalid'
+  | 'model_not_found'
+  | 'provider_unavailable'
+  | 'timeout'
+  | 'unknown';
+
+/**
+ * 供应商错误
+ */
+export interface ProviderError {
+  code: ProviderErrorCode;
+  message: string;
+  provider: string;
+  raw?: unknown;
 }
 
 // Re-export SlideSpec types

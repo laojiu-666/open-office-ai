@@ -1,4 +1,4 @@
-import type { ILLMProvider, LLMRequest, LLMResponse, LLMStreamHandlers, LLMStreamController, LLMModelInfo } from '@/types';
+import type { ILLMProvider, LLMRequest, LLMResponse, LLMStreamHandlers, LLMStreamController, LLMModelInfo, ToolCall } from '@/types';
 
 export class OpenAIProvider implements ILLMProvider {
   readonly id = 'openai' as const;
@@ -22,20 +22,103 @@ export class OpenAIProvider implements ILLMProvider {
     ];
   }
 
+  private convertMessages(messages: LLMRequest['messages']): any[] {
+    return messages.map((msg) => {
+      if (msg.role === 'tool') {
+        return {
+          role: 'tool',
+          tool_call_id: msg.toolCallId,
+          content: msg.content,
+        };
+      } else if (msg.role === 'assistant' && msg.toolCalls) {
+        return {
+          role: 'assistant',
+          content: msg.content || null,
+          tool_calls: msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments),
+            },
+          })),
+        };
+      } else {
+        return {
+          role: msg.role,
+          content: msg.content,
+        };
+      }
+    });
+  }
+
+  private parseToolCalls(rawToolCalls: any[]): ToolCall[] | undefined {
+    if (!Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
+      return undefined;
+    }
+
+    const toolCalls: ToolCall[] = [];
+    for (const call of rawToolCalls) {
+      if (call?.function?.name) {
+        let args: Record<string, unknown> = {};
+        let parsingError: string | undefined;
+
+        try {
+          const argsStr = call.function.arguments || '{}';
+          args = JSON.parse(argsStr);
+        } catch (error) {
+          parsingError = error instanceof Error ? error.message : 'JSON parse failed';
+          console.error('[OpenAI] Tool call argument parsing failed:', {
+            toolName: call.function.name,
+            rawArguments: call.function.arguments,
+            error: parsingError,
+          });
+          args = {};
+        }
+
+        toolCalls.push({
+          id: call.id || crypto.randomUUID(),
+          name: call.function.name,
+          arguments: args,
+          parsingError,
+        });
+      }
+    }
+
+    return toolCalls.length > 0 ? toolCalls : undefined;
+  }
+
   async send(request: LLMRequest, signal?: AbortSignal): Promise<LLMResponse> {
+    const body: any = {
+      model: request.model,
+      messages: this.convertMessages(request.messages),
+      temperature: request.temperature ?? 0.7,
+      max_tokens: request.maxTokens,
+      stream: false,
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      body.tools = request.tools.map((tool) => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        },
+      }));
+
+      if (request.toolChoice) {
+        body.tool_choice = request.toolChoice;
+      }
+    }
+
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model: request.model,
-        messages: request.messages,
-        temperature: request.temperature ?? 0.7,
-        max_tokens: request.maxTokens,
-        stream: false,
-      }),
+      body: JSON.stringify(body),
       signal,
     });
 
@@ -45,10 +128,20 @@ export class OpenAIProvider implements ILLMProvider {
     }
 
     const data = await response.json();
+    const message = data.choices[0]?.message || {};
+    const toolCalls = this.parseToolCalls(message.tool_calls);
+    const finishReason = data.choices[0]?.finish_reason;
+
     return {
       id: data.id,
-      content: data.choices[0]?.message?.content || '',
-      finishReason: data.choices[0]?.finish_reason === 'stop' ? 'stop' : 'length',
+      content: message.content || '',
+      finishReason:
+        finishReason === 'tool_calls'
+          ? 'tool_calls'
+          : finishReason === 'stop'
+          ? 'stop'
+          : 'length',
+      toolCalls,
     };
   }
 

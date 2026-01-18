@@ -25,6 +25,12 @@ import { TestLogConsole } from './TestLogConsole';
 import { TextTestSection } from './sections/TextTestSection';
 import { ImageTestSection } from './sections/ImageTestSection';
 import { BackgroundTestSection } from './sections/BackgroundTestSection';
+import { SlideTestSection } from './sections/SlideTestSection';
+import { SelectionTestSection } from './sections/SelectionTestSection';
+import { SelectionInfoSection } from './sections/SelectionInfoSection';
+import { ShapeTestSection } from './sections/ShapeTestSection';
+import { TableTestSection } from './sections/TableTestSection';
+import { ToolHistorySection } from './sections/ToolHistorySection';
 import { PowerPointTestRunner } from '@adapters/powerpoint/test-runner';
 
 const useStyles = makeStyles({
@@ -88,18 +94,27 @@ const useStyles = makeStyles({
 
 // 检测 API 支持情况
 function checkApiSupport() {
+  const api12 = Office.context.requirements.isSetSupported('PowerPointApi', '1.2');
+  const api13 = Office.context.requirements.isSetSupported('PowerPointApi', '1.3');
   const api14 = Office.context.requirements.isSetSupported('PowerPointApi', '1.4');
+  const api16 = Office.context.requirements.isSetSupported('PowerPointApi', '1.6');
   const api18 = Office.context.requirements.isSetSupported('PowerPointApi', '1.8');
   const api110 = Office.context.requirements.isSetSupported('PowerPointApi', '1.10');
-  return { api14, api18, api110 };
+  return { api12, api13, api14, api16, api18, api110 };
 }
 
 export function DeveloperPage() {
   const styles = useStyles();
   const { setSettingsPage } = useAppStore();
   const { logs, addLog, clearLogs } = useTestConsole();
-  const [clearing, setClearing] = React.useState(false);
-  const [apiSupport, setApiSupport] = React.useState({ api14: false, api18: false, api110: false });
+  const [apiSupport, setApiSupport] = React.useState({
+    api12: false,
+    api13: false,
+    api14: false,
+    api16: false,
+    api18: false,
+    api110: false,
+  });
 
   React.useEffect(() => {
     // 检测 API 支持
@@ -112,39 +127,6 @@ export function DeveloperPage() {
 
   const handleBack = () => {
     setSettingsPage('main');
-  };
-
-  const handleClearSlide = async () => {
-    setClearing(true);
-    addLog('info', '开始清除幻灯片内容...');
-
-    try {
-      const result = await PowerPointTestRunner.clearSlide();
-      if (result.success) {
-        addLog('success', `幻灯片已清除: ${result.method}`);
-      } else {
-        addLog('error', `清除失败: ${result.error}`);
-      }
-    } catch (error) {
-      addLog('error', `异常: ${error instanceof Error ? error.message : '未知错误'}`);
-    } finally {
-      setClearing(false);
-    }
-  };
-
-  const handleGetInfo = async () => {
-    addLog('info', '获取幻灯片信息...');
-
-    try {
-      const result = await PowerPointTestRunner.getSlideInfo();
-      if (result.success) {
-        addLog('success', `当前幻灯片: 第 ${(result.slideIndex ?? 0) + 1} 页，包含 ${result.shapeCount} 个形状`);
-      } else {
-        addLog('error', `获取信息失败: ${result.error}`);
-      }
-    } catch (error) {
-      addLog('error', `异常: ${error instanceof Error ? error.message : '未知错误'}`);
-    }
   };
 
   const ApiStatusIcon = ({ supported }: { supported: boolean }) =>
@@ -180,58 +162,44 @@ export function DeveloperPage() {
             {apiSupport.api18 ? (
               <Badge appearance="filled" color="success" size="small">图片/背景可用</Badge>
             ) : (
-              <Badge appearance="filled" color="danger" size="small">图片/背景不可用</Badge>
+              <Badge appearance="filled" color="warning" size="small">图片兼容模式</Badge>
             )}
           </div>
           <div className={styles.apiStatusRow}>
             <ApiStatusIcon supported={apiSupport.api110} />
             <span>1.10 (原生背景)</span>
-            {apiSupport.api110 && <Badge appearance="filled" color="informative" size="small">原生背景 API</Badge>}
+            {apiSupport.api110 && <Badge appearance="filled" color="success" size="small">可用</Badge>}
           </div>
         </div>
 
         {/* 警告提示 */}
         {!apiSupport.api18 && (
-          <MessageBar intent="error" className={styles.warning}>
+          <MessageBar intent="warning" className={styles.warning}>
             <MessageBarBody>
-              您的 PowerPoint 版本不支持图片填充功能（需要 PowerPointApi 1.8+）。
-              图片插入和背景设置功能将不可用。请更新 Office 到最新版本。
+              您的 PowerPoint 版本不支持高级图片 API（PowerPointApi 1.8+）。
+              图片插入将使用兼容模式（setSelectedDataAsync），背景设置功能不可用。
+              建议更新 Office 到最新版本以获得最佳体验。
             </MessageBarBody>
           </MessageBar>
         )}
 
-        <MessageBar intent="warning" className={styles.warning}>
+        <MessageBar intent="info" className={styles.warning}>
           <MessageBarBody>
             <InfoRegular style={{ marginRight: '8px' }} />
             测试操作将直接修改当前选中的幻灯片，请确保已选择正确的幻灯片。
           </MessageBarBody>
         </MessageBar>
 
-        {/* 快捷操作 */}
-        <div className={styles.actions}>
-          <Button
-            appearance="secondary"
-            size="small"
-            icon={clearing ? <Spinner size="tiny" /> : <DeleteRegular />}
-            onClick={handleClearSlide}
-            disabled={clearing}
-          >
-            清除幻灯片
-          </Button>
-          <Button
-            appearance="secondary"
-            size="small"
-            icon={<InfoRegular />}
-            onClick={handleGetInfo}
-          >
-            获取信息
-          </Button>
-        </div>
-
         {/* 测试区块 */}
+        <SlideTestSection onAddLog={addLog} />
+        <SelectionTestSection onAddLog={addLog} />
+        <SelectionInfoSection onAddLog={addLog} />
         <TextTestSection onAddLog={addLog} />
-        <ImageTestSection onAddLog={addLog} disabled={!apiSupport.api18} />
+        <ImageTestSection onAddLog={addLog} />
         <BackgroundTestSection onAddLog={addLog} disabled={!apiSupport.api18} />
+        <ShapeTestSection onAddLog={addLog} />
+        <TableTestSection onAddLog={addLog} />
+        <ToolHistorySection />
 
         {/* 日志控制台 */}
         <div className={styles.console}>

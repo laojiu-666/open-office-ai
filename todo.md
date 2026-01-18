@@ -1,78 +1,236 @@
-# Open Office AI - 待处理问题
+# TODO - PPT Function Calling 系统进阶任务
 
-## 高优先级
-
-### 1. 无法自动获取整页 PPT 内容
-
-**问题描述**：
-PowerPoint JS API 对 `GeometricShape` 类型的形状（包括模板占位符如标题、副标题）不支持直接访问 `textFrame` 属性，导致无法自动读取 PPT 中的文本内容。
-
-**当前状态**：
-- 用户需要先选中文本，才能让 AI 理解 PPT 内容
-- 如果没有选中文本，会显示提示信息
-
-**影响范围**：
-- `src/adapters/powerpoint/context.ts` - `getSlideTextContent()` 函数
-
-**可能的解决方案**：
-1. **UI 提示**：在界面上提示用户"选中文本后 AI 可以理解内容"
-2. **OOXML 方案**：研究通过 `Office.context.document.getFileAsync()` 获取 OOXML 格式的文档内容，然后解析 XML 提取文本
-3. **剪贴板方案**：尝试通过模拟 Ctrl+A 全选后获取内容（可能有权限限制）
-4. **等待 API 更新**：关注微软 PowerPoint JS API 的更新，可能会增加对更多形状类型的支持
-
-**相关日志**：
-```
-[getSlideTextContent] Slide 1, Shape 0: type=GeometricShape, name=Title 1
-[getSlideTextContent] Slide 1, Shape 0: no text support
-```
-
-**参考文档**：
-- [PowerPoint JavaScript API](https://learn.microsoft.com/en-us/javascript/api/powerpoint)
-- [Shape.textFrame 属性](https://learn.microsoft.com/en-us/javascript/api/powerpoint/powerpoint.shape#powerpoint-powerpoint-shape-textframe-member)
+> 当前系统已实现核心功能，以下为后续优化和扩展方向
 
 ---
 
-## 中优先级
+## ✅ 已完成任务（2026-01-18）
 
-### 2. 移除调试日志
+- ✅ 实现完整的多轮对话循环（P0）
+- ✅ 增强参数校验错误反馈（P0）
+- ✅ 添加工具调用历史记录基础设施（P2）
 
-**问题描述**：
-代码中添加了大量 `console.log` 调试日志，生产环境需要移除或改为可配置的日志级别。
+---
 
-**影响范围**：
-- `src/adapters/powerpoint/context.ts`
-- `src/adapters/powerpoint/slide-renderer.ts`
+## 🔴 高优先级（影响核心体验）
+
+### 4. 验证并优化 Fallback 逻辑（P1）
+**当前状态**：需要审查 `applySlideSpec` 的 fallback 逻辑是否安全
+**目标**：确认当前 Fallback 逻辑安全，或修复潜在问题
+
+**实施步骤**：
+- [ ] 验证 `applySlideSpec` 是否总是先创建新幻灯片
+- [ ] 检查是否有其他路径可能污染当前幻灯片
+- [ ] 审查 `slide-renderer.ts` 中的所有 fallback 逻辑
+- [ ] 添加安全检查（如需要）
+- [ ] 添加日志记录 fallback 触发情况
+- [ ] 添加用户确认机制（可选）
+
+**相关文件**：
+- `src/adapters/powerpoint/slide-renderer.ts:61-85`
+- `src/core/tools/ppt-tools.ts:100-108`
+
+---
+
+### 5. 能力路由系统与图片生成服务重构（P1）
+**当前状态**：需要将图片生成服务迁移到新的能力路由架构
+**目标**：统一 LLM 和图片生成服务的能力管理，支持多提供商动态路由
+
+**实施步骤**：
+- [ ] 修改图片生成服务使用适配器模式
+  - 重构 `src/core/image/provider.ts` 使用统一的 Provider 接口
+  - 支持多个图片生成提供商（OpenAI DALL-E、Stability AI 等）
+  - 实现能力标签系统（如 `image-generation`, `text-to-image`）
+- [ ] 在应用启动时初始化注册表
+  - 在 `src/taskpane/index.tsx` 中初始化 CapabilityRouter
+  - 注册所有可用的 LLM 和图片生成 Provider
+  - 添加 Provider 健康检查和降级逻辑
+- [ ] 增加能力标签展示
+  - 在设置页面显示当前可用的 Provider 及其能力
+  - 添加能力状态指示器（可用/不可用/降级）
+  - 支持用户手动选择 Provider 或使用自动路由
+- [ ] 测试文本和图片生成功能
+  - 验证 LLM Provider 的能力路由正确性
+  - 验证图片生成 Provider 的能力路由正确性
+  - 测试多 Provider 场景下的自动降级
+
+**相关文件**：
+- `src/core/capability-router.ts`
+- `src/core/providers/`
+- `src/core/image/provider.ts`
+- `src/taskpane/index.tsx`
+- `src/ui/components/settings/SettingsView.tsx`
+
+---
+
+## 🟡 中优先级（提升用户体验）
+
+### 6. 添加工具调用历史记录 UI（P2）
+**当前状态**：后端已实现历史记录，缺少 UI 展示
+**目标**：在开发者页面显示完整的工具调用历史
+
+**实施步骤**：
+- [ ] 创建 `src/ui/components/developer/sections/ToolHistorySection.tsx`
+  - 显示表格: 时间 | 工具 | 参数 | 结果 | 耗时 | 状态
+  - 支持筛选（成功/失败）和搜索
+  - 支持导出为 JSON
+- [ ] 在 `src/ui/components/developer/DeveloperPage.tsx` 中集成新 Section
+
+**参考实现**：Gemini 已提供完整的 UI 原型（见 `.claude/plan/ppt-function-calling-enhancements.md`）
+
+---
+
+### 7. 支持流式工具调用（P2）
+**当前状态**：使用 `provider.send()` 进行同步调用
+**目标**：使用 `provider.stream()` 实现流式工具调用
+
+**实施步骤**：
+- [ ] 研究 OpenAI 流式 tool_calls 格式（delta 累积）
+- [ ] 修改 `useLLMStream.ts` 使用 `stream()` 代替 `send()`
+- [ ] 实现 tool_calls delta 累积和解析
+- [ ] 在 UI 中实时显示工具调用进度
+- [ ] 测试流式场景
+
+**相关文件**：
 - `src/ui/hooks/useLLMStream.ts`
-- `src/ui/components/chat/InputArea.tsx`
-- `src/core/llm/response-parser.ts`
-
-**建议**：
-- 引入日志工具库或创建简单的日志封装
-- 支持通过环境变量控制日志级别
+- `src/core/llm/openai.ts`
 
 ---
 
-## 低优先级
+### 8. 扩展 Anthropic 和 Gemini Provider（P2）
+**当前状态**：仅 OpenAI Provider 支持 Function Calling
+**目标**：适配 Anthropic Tool Use 和 Gemini Function Calling
 
-### 3. 上下文管理优化
+**实施步骤**：
+- [ ] **Anthropic Provider**：
+  - 研究 Anthropic Tool Use API 格式
+  - 实现 `tools` 参数转换
+  - 实现 `tool_use` 响应解析
+  - 实现 `tool_result` 消息构建
+- [ ] **Gemini Provider**：
+  - 研究 Gemini Function Calling API 格式
+  - 实现 `tools` 参数转换
+  - 实现 `functionCall` 响应解析
+  - 实现 `functionResponse` 消息构建
+- [ ] 统一接口，确保三个 Provider 的工具调用接口一致
+- [ ] 在 `factory.ts` 中添加 Provider 能力检测
 
-**问题描述**：
-当前的 Token 估算使用简单的字符数除以 2 的方式，可能不够精确。
+**参考实现**：Codex 已提供完整的 Unified Diff（见 `.claude/plan/ppt-function-calling-enhancements.md`）
 
-**当前实现**：
-- `src/ui/hooks/useLLMStream.ts` - `estimateTokens()` 函数
-
-**可能的优化**：
-- 引入 `tiktoken` 或类似库进行精确的 token 计算
-- 针对中英文混合内容优化估算算法
+**相关文件**：
+- `src/core/llm/anthropic.ts`
+- `src/core/llm/gemini.ts`
+- `src/core/llm/factory.ts`
 
 ---
 
-## 已完成
+## 🟢 低优先级（锦上添花）
 
-- [x] 修复生成幻灯片时 `load` 报错
-- [x] 生成幻灯片时移除默认的占位标题和副标题
-- [x] 生成幻灯片按钮不显示的问题
-- [x] 实现上下文管理（Token 预算 + 滑动窗口）
-- [x] 修复 Griffel `borderColor` 简写属性警告
-- [x] 修复 `@fluentui/react-icons` 图标导入错误
+### 9. 添加工具权限管理
+**目标**：敏感操作需要用户确认
+
+**实施步骤**：
+- [ ] 定义敏感工具列表（如删除、修改等）
+- [ ] 在工具执行前添加确认对话框
+- [ ] 记录用户授权历史
+
+---
+
+### 10. 实现工具组合调用
+**目标**：支持一次调用多个工具
+
+**实施步骤**：
+- [ ] 设计工具组合 DSL
+- [ ] 实现并行工具执行
+- [ ] 处理工具间依赖关系
+
+---
+
+### 11. 优化大参数传输
+**问题**：base64 图片数据可能导致请求过大
+
+**实施步骤**：
+- [ ] 实现图片压缩
+- [ ] 支持图片 URL 引用
+- [ ] 添加参数大小限制
+
+---
+
+### 12. 添加单元测试和集成测试
+**当前状态**：无测试覆盖
+
+**实施步骤**：
+- [ ] **单元测试**：
+  - `parseToolCalls` 的错误处理逻辑
+  - `executeStream` 的递归逻辑
+  - 工具历史记录的存储和检索
+- [ ] **集成测试**：
+  - 完整的多轮对话流程
+  - 工具调用失败后的错误处理
+  - 跨 Provider 的工具调用一致性
+- [ ] **E2E 测试**：
+  - 用户发起工具调用请求
+  - 工具执行成功/失败场景
+  - 递归工具调用场景
+
+---
+
+## 📝 文档和维护
+
+### 13. 完善工具文档
+- [ ] 在 `src/core/tools/README.md` 维护工具列表
+- [ ] 为每个工具添加使用示例
+- [ ] 记录工具调用最佳实践
+
+---
+
+### 14. 性能优化
+- [ ] 分析 bundle 大小（当前 24.2 MiB）
+- [ ] 实现代码分割
+- [ ] 懒加载非关键组件
+- [ ] 优化图片资源加载
+
+---
+
+### 15. 错误监控
+- [ ] 集成错误追踪服务（如 Sentry）
+- [ ] 记录工具调用失败率
+- [ ] 监控 LLM API 调用性能
+
+---
+
+### 16. 添加设置页面配置项
+- [ ] 在 `SettingsView.tsx` 中添加 `maxToolCallDepth` 配置项
+- [ ] 添加工具调用超时配置
+- [ ] 添加工具调用重试策略配置
+
+---
+
+## 📊 实施进度
+
+| 任务 | 优先级 | 状态 | 完成时间 |
+|------|--------|------|----------|
+| 1. 多轮对话循环 | P0 | ✅ 已完成 | 2026-01-18 |
+| 2. 参数校验错误反馈 | P0 | ✅ 已完成 | 2026-01-18 |
+| 3. 工具历史记录（基础） | P2 | ✅ 已完成 | 2026-01-18 |
+| 4. Fallback 逻辑验证 | P1 | ⏳ 待实施 | - |
+| 5. 能力路由系统与图片生成服务重构 | P1 | ⏳ 待实施 | - |
+| 6. 工具历史记录 UI | P2 | ⏳ 待实施 | - |
+| 7. 流式工具调用 | P2 | ⏳ 待实施 | - |
+| 8. Provider 扩展 | P2 | ⏳ 待实施 | - |
+| 9-16. 其他任务 | P3 | ⏳ 待实施 | - |
+
+---
+
+## 🎯 下一步建议
+
+1. **优先完成任务 5**：能力路由系统重构是架构升级的关键，支持多提供商动态路由和降级
+2. **考虑任务 6**：工具历史记录 UI 对调试非常有用，且 Gemini 已提供完整原型
+3. **任务 7 可提升体验**：流式工具调用可显著提升用户体验
+4. **任务 8 可延后**：Anthropic 和 Gemini Provider 扩展优先级较低，除非有明确需求
+
+---
+
+**最后更新**：2026-01-18
+**当前版本**：v1.2.0 (核心功能已实现，能力路由系统规划中)
+**TypeScript 类型检查**：✅ 通过
