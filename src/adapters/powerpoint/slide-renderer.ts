@@ -820,16 +820,21 @@ export async function setSlideBackground(
               slideAny.background.isMasterBackgroundFollowed = false;
               await context.sync();
 
-              const transparency = Math.max(0, Math.min(1, options?.transparency ?? 0));
-              slideAny.background.fill.setPictureOrTextureFill({
-                imageBase64: processedImageData,
-                transparency,
-              });
-              await context.sync();
-              console.log('[setSlideBackground] setPictureOrTextureFill completed');
+              // 注意：setPictureOrTextureFill 需要纯 base64 字符串（不带 data: 前缀）
+              // 并且 transparency 参数在某些版本中可能不支持
+              try {
+                slideAny.background.fill.setPictureOrTextureFill({
+                  imageBase64: processedImageData,
+                });
+                await context.sync();
+                console.log('[setSlideBackground] setPictureOrTextureFill completed');
 
-              resolve({ success: true, method: 'background-api' });
-              return;
+                resolve({ success: true, method: 'background-api' });
+                return;
+              } catch (fillError) {
+                console.warn('[setSlideBackground] setPictureOrTextureFill failed, trying fallback:', fillError);
+                // 继续尝试降级方案
+              }
             }
           } catch (error) {
             console.warn('[setSlideBackground] Native API failed:', error);
@@ -866,6 +871,342 @@ export async function setSlideBackground(
         });
       }
     }).catch((error) => {
+      resolve({
+        success: false,
+        error: error instanceof Error ? error.message : 'PowerPoint API 调用失败',
+      });
+    });
+  });
+}
+
+/**
+ * 替换当前幻灯片的所有内容
+ * 清空当前幻灯片的所有形状，然后应用新的 SlideSpec
+ */
+export async function replaceSlideContent(spec: SlideSpec): Promise<ApplySlideSpecResult> {
+  console.log('[replaceSlideContent] Starting with layout:', spec.layout.template);
+
+  return new Promise((resolve) => {
+    PowerPoint.run(async (context) => {
+      try {
+        // 获取当前选中的幻灯片
+        const selectedSlides = context.presentation.getSelectedSlides();
+        selectedSlides.load('items');
+        await context.sync();
+
+        if (selectedSlides.items.length === 0) {
+          resolve({ success: false, error: '请先选择一个幻灯片' });
+          return;
+        }
+
+        const currentSlide = selectedSlides.items[0];
+        currentSlide.load('id');
+        await context.sync();
+
+        console.log('[replaceSlideContent] Current slide ID:', currentSlide.id);
+
+        // 清空当前幻灯片的所有形状
+        const shapes = currentSlide.shapes;
+        shapes.load('items');
+        await context.sync();
+
+        console.log('[replaceSlideContent] Removing', shapes.items.length, 'existing shapes');
+        for (const shape of shapes.items) {
+          try {
+            shape.delete();
+          } catch (e) {
+            console.warn('[replaceSlideContent] Failed to delete shape:', e);
+          }
+        }
+        await context.sync();
+
+        // 尝试重置背景（如果 API 支持）
+        if (Office.context.requirements.isSetSupported('PowerPointApi', '1.10')) {
+          try {
+            const slideAny = currentSlide as any;
+            if (slideAny.background) {
+              slideAny.background.isMasterBackgroundFollowed = true; // 恢复跟随母版
+              await context.sync();
+            }
+          } catch (e) {
+            console.warn('[replaceSlideContent] Failed to reset background:', e);
+          }
+        }
+
+        const createdShapeIds: string[] = [];
+
+        // 应用背景（如果有）
+        if (spec.background) {
+          const slideSize = { width: 960, height: 540 };
+          const bgResult = await applyBackground(context, currentSlide, spec, spec.assets, slideSize);
+          console.log('[replaceSlideContent] Background result:', bgResult);
+        }
+
+        // 获取布局配置
+        const layoutConfig = DEFAULT_LAYOUTS[spec.layout.template] || DEFAULT_LAYOUTS['title-content'];
+        const slots = layoutConfig.slots;
+        console.log('[replaceSlideContent] Using layout:', spec.layout.template, 'slots:', slots);
+
+        // 处理每个内容块
+        for (const block of spec.blocks) {
+          console.log('[replaceSlideContent] Processing block:', block);
+          const slot = slots.find((s) => s.id === block.slotId);
+          if (!slot) {
+            console.log('[replaceSlideContent] No slot found for slotId:', block.slotId);
+            continue;
+          }
+
+          if (block.kind === 'text') {
+            const shapeId = await addTextShape(context, currentSlide, block, slot.bounds, spec.theme);
+            console.log('[replaceSlideContent] Added text shape:', shapeId);
+            if (shapeId) createdShapeIds.push(shapeId);
+          } else if (block.kind === 'image') {
+            const asset = spec.assets?.find((a) => a.id === block.assetId);
+            if (asset && asset.data) {
+              const shapeId = await addImageShape(context, currentSlide, asset, slot.bounds);
+              console.log('[replaceSlideContent] Added image shape:', shapeId);
+              if (shapeId) createdShapeIds.push(shapeId);
+            }
+          }
+        }
+
+        // 获取当前幻灯片索引
+        const presentation = context.presentation;
+        const slides = presentation.slides;
+        slides.load('items');
+        await context.sync();
+
+        let slideIndex = -1;
+        for (let i = 0; i < slides.items.length; i++) {
+          slides.items[i].load('id');
+        }
+        await context.sync();
+
+        for (let i = 0; i < slides.items.length; i++) {
+          if (slides.items[i].id === currentSlide.id) {
+            slideIndex = i;
+            break;
+          }
+        }
+
+        console.log('[replaceSlideContent] Success! slideIndex:', slideIndex);
+        resolve({
+          success: true,
+          slideId: currentSlide.id,
+          slideIndex,
+          createdShapeIds,
+        });
+      } catch (error) {
+        console.error('[replaceSlideContent] Error:', error);
+        resolve({
+          success: false,
+          error: error instanceof Error ? error.message : '替换幻灯片内容失败',
+        });
+      }
+    }).catch((error) => {
+      console.error('[replaceSlideContent] PowerPoint.run error:', error);
+      resolve({
+        success: false,
+        error: error instanceof Error ? error.message : 'PowerPoint API 调用失败',
+      });
+    });
+  });
+}
+
+/**
+ * 更新当前幻灯片的特定元素
+ * 支持更新标题、正文或添加图片，不影响其他内容
+ */
+export async function updateSlideElement(
+  elementType: 'title' | 'body' | 'image',
+  content: string,
+  options?: {
+    action?: 'replace' | 'append';
+    bounds?: Bounds;
+    style?: TextStyle;
+  }
+): Promise<{ success: boolean; shapeId?: string; error?: string }> {
+  console.log('[updateSlideElement] Type:', elementType, 'Action:', options?.action || 'replace');
+
+  return new Promise((resolve) => {
+    PowerPoint.run(async (context) => {
+      try {
+        const selectedSlides = context.presentation.getSelectedSlides();
+        selectedSlides.load('items');
+        await context.sync();
+
+        if (selectedSlides.items.length === 0) {
+          resolve({ success: false, error: '请先选择一个幻灯片' });
+          return;
+        }
+
+        const slide = selectedSlides.items[0];
+
+        if (elementType === 'image') {
+          // 添加图片（增量操作）
+          const defaultBounds: Bounds = options?.bounds || {
+            x: 50,
+            y: 110,
+            width: 400,
+            height: 300,
+          };
+
+          const shape = slide.shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle, {
+            left: defaultBounds.x,
+            top: defaultBounds.y,
+            width: defaultBounds.width,
+            height: defaultBounds.height,
+          });
+
+          shape.load(['id', 'fill']);
+          await context.sync();
+
+          // 处理 base64 数据
+          let imageData = content;
+          if (imageData.startsWith('data:')) {
+            const base64Index = imageData.indexOf('base64,');
+            if (base64Index !== -1) {
+              imageData = imageData.substring(base64Index + 7);
+            }
+          }
+          imageData = imageData.replace(/\s/g, '');
+
+          shape.fill.setSolidColor('white');
+          await context.sync();
+
+          shape.fill.setImage(imageData);
+          shape.lineFormat.visible = false;
+          await context.sync();
+
+          resolve({ success: true, shapeId: shape.id });
+          return;
+        }
+
+        // 处理文本元素（标题或正文）
+        const shapes = slide.shapes;
+        shapes.load('items');
+        await context.sync();
+
+        // 批量加载所有形状的基本信息
+        for (const shape of shapes.items) {
+          shape.load(['id', 'type', 'top', 'left', 'width', 'height']);
+        }
+        await context.sync();
+
+        // 查找目标形状（根据位置判断）
+        let targetShape: PowerPoint.Shape | null = null;
+        let targetBounds: Bounds;
+
+        if (elementType === 'title') {
+          targetBounds = { x: 50, y: 30, width: 860, height: 60 };
+          // 查找顶部的形状（y < 100）
+          for (const shape of shapes.items) {
+            if (shape.top < 100) {
+              targetShape = shape;
+              break;
+            }
+          }
+        } else {
+          // body
+          targetBounds = { x: 50, y: 110, width: 860, height: 380 };
+          // 查找中部的形状（y >= 100）
+          for (const shape of shapes.items) {
+            if (shape.top >= 100) {
+              targetShape = shape;
+              break;
+            }
+          }
+        }
+
+        if (targetShape) {
+          // 更新现有形状
+          console.log('[updateSlideElement] Found existing shape:', targetShape.id);
+
+          // 加载 textFrame
+          targetShape.load('textFrame');
+          await context.sync();
+
+          // 检查是否有 textFrame
+          if (!targetShape.textFrame) {
+            console.warn('[updateSlideElement] Shape has no textFrame, creating new shape');
+            targetShape = null; // 标记为 null，后面会创建新形状
+          } else {
+            targetShape.textFrame.load('textRange');
+            await context.sync();
+
+            const textRange = targetShape.textFrame.textRange;
+            if (options?.action === 'append') {
+              textRange.load('text');
+              await context.sync();
+              textRange.text = textRange.text + '\n' + content;
+            } else {
+              textRange.text = content;
+            }
+
+            // 应用样式
+            if (options?.style) {
+              textRange.load('font');
+              await context.sync();
+              const font = textRange.font;
+
+              if (options.style.fontFamily) font.name = options.style.fontFamily;
+              if (options.style.fontSize) font.size = options.style.fontSize;
+              if (options.style.bold !== undefined) font.bold = options.style.bold;
+              if (options.style.italic !== undefined) font.italic = options.style.italic;
+              if (options.style.color) {
+                const color = options.style.color.startsWith('#') ? options.style.color.slice(1) : options.style.color;
+                font.color = color;
+              }
+            }
+
+            await context.sync();
+            resolve({ success: true, shapeId: targetShape.id });
+            return;
+          }
+        }
+
+        // 如果没有找到合适的形状，或形状没有 textFrame，创建新形状
+        console.log('[updateSlideElement] Creating new text box');
+        const newShape = slide.shapes.addTextBox(content, {
+          left: targetBounds.x,
+          top: targetBounds.y,
+          width: targetBounds.width,
+          height: targetBounds.height,
+        });
+
+        newShape.load(['id', 'textFrame']);
+        await context.sync();
+
+        // 应用样式
+        if (options?.style) {
+          newShape.textFrame.load('textRange');
+          await context.sync();
+          const textRange = newShape.textFrame.textRange;
+          textRange.load('font');
+          await context.sync();
+          const font = textRange.font;
+
+          if (options.style.fontFamily) font.name = options.style.fontFamily;
+          if (options.style.fontSize) font.size = options.style.fontSize;
+          if (options.style.bold !== undefined) font.bold = options.style.bold;
+          if (options.style.italic !== undefined) font.italic = options.style.italic;
+          if (options.style.color) {
+            const color = options.style.color.startsWith('#') ? options.style.color.slice(1) : options.style.color;
+            font.color = color;
+          }
+        }
+
+        await context.sync();
+        resolve({ success: true, shapeId: newShape.id });
+      } catch (error) {
+        console.error('[updateSlideElement] Error:', error);
+        resolve({
+          success: false,
+          error: error instanceof Error ? error.message : '更新元素失败',
+        });
+      }
+    }).catch((error) => {
+      console.error('[updateSlideElement] PowerPoint.run error:', error);
       resolve({
         success: false,
         error: error instanceof Error ? error.message : 'PowerPoint API 调用失败',

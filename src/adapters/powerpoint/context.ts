@@ -26,56 +26,37 @@ export async function getPresentationContext(): Promise<PresentationContext> {
       const slideCount = slides.items.length;
 
       // 获取当前选中的幻灯片索引
-      let currentSlideIndex = 0;
-      try {
-        const selectedSlides = presentation.getSelectedSlides();
-        selectedSlides.load('items');
-        await context.sync();
-        if (selectedSlides.items.length > 0) {
-          const selectedSlide = selectedSlides.items[0];
-          selectedSlide.load('id');
-          await context.sync();
-          // 查找索引
-          for (let i = 0; i < slides.items.length; i++) {
-            slides.items[i].load('id');
-          }
-          await context.sync();
-          for (let i = 0; i < slides.items.length; i++) {
-            if (slides.items[i].id === selectedSlide.id) {
-              currentSlideIndex = i;
-              break;
-            }
-          }
-        }
-      } catch {
-        // 如果无法获取选中幻灯片，使用默认值
-      }
+      const selectedSlides = presentation.getSelectedSlides();
+      selectedSlides.load('items');
+      await context.sync();
 
-      // 尝试获取实际幻灯片尺寸（PowerPointApi 1.10+）
-      let slideWidth = 960;
-      let slideHeight = 540;
-      try {
-        if (Office.context.requirements.isSetSupported('PowerPointApi', '1.10')) {
-          const pageSetup = (presentation as any).pageSetup;
-          if (pageSetup) {
-            pageSetup.load(['slideWidth', 'slideHeight']);
-            await context.sync();
-            slideWidth = pageSetup.slideWidth ?? 960;
-            slideHeight = pageSetup.slideHeight ?? 540;
+      let currentSlideIndex = 0;
+      if (selectedSlides.items.length > 0) {
+        const selectedSlide = selectedSlides.items[0];
+        selectedSlide.load('id');
+        await context.sync();
+
+        // 查找选中幻灯片的索引
+        for (let i = 0; i < slides.items.length; i++) {
+          slides.items[i].load('id');
+        }
+        await context.sync();
+
+        for (let i = 0; i < slides.items.length; i++) {
+          if (slides.items[i].id === selectedSlide.id) {
+            currentSlideIndex = i;
+            break;
           }
         }
-      } catch {
-        // API 不支持或获取失败，使用默认值
       }
 
       resolve({
         slideCount,
         currentSlideIndex,
-        slideWidth,
-        slideHeight,
+        slideWidth: 960,
+        slideHeight: 540,
       });
     }).catch(() => {
-      // 降级返回默认值
       resolve({
         slideCount: 0,
         currentSlideIndex: 0,
@@ -84,6 +65,24 @@ export async function getPresentationContext(): Promise<PresentationContext> {
       });
     });
   });
+}
+
+// 获取主题信息
+export async function getThemeSpec(): Promise<ThemeSpec | null> {
+  // PowerPoint JS API 对主题的支持有限，返回默认 Office 主题
+  return {
+    name: 'Office Theme',
+    fonts: {
+      heading: 'Calibri Light',
+      body: 'Calibri',
+    },
+    colors: {
+      primary: '#5B9BD5',
+      text: '#000000',
+      background: '#FFFFFF',
+      accent: '#ED7D31',
+    },
+  };
 }
 
 // 获取当前幻灯片详细上下文
@@ -116,6 +115,7 @@ export async function getSlideContext(): Promise<SlideContext | null> {
         slides.items[i].load('id');
       }
       await context.sync();
+
       for (let i = 0; i < slides.items.length; i++) {
         if (slides.items[i].id === slide.id) {
           slideIndex = i;
@@ -124,24 +124,29 @@ export async function getSlideContext(): Promise<SlideContext | null> {
       }
 
       // 获取形状信息
+      const shapeItems = slide.shapes;
+      shapeItems.load('items');
+      await context.sync();
+
       const shapes: ShapeInfo[] = [];
-      const slideShapes = slide.shapes;
-      slideShapes.load(['items']);
-      await context.sync();
 
-      for (const shape of slideShapes.items) {
-        shape.load(['id', 'type', 'left', 'top', 'width', 'height']);
-        try {
-          if (shape.textFrame) {
-            shape.textFrame.load(['hasText', 'textRange']);
-          }
-        } catch {
-          // 某些形状可能没有 textFrame
+      for (const shape of shapeItems.items) {
+        shape.load(['id', 'type', 'left', 'top', 'width', 'height', 'textFrame']);
+        await context.sync();
+
+        const shapeType = shape.type as string;
+        let type: ShapeInfo['type'] = 'unknown';
+
+        if (shapeType === 'GeometricShape') {
+          type = 'shape';
+        } else if (shapeType === 'Image') {
+          type = 'image';
+        } else if (shapeType === 'Group') {
+          type = 'group';
+        } else if (shape.textFrame && shape.textFrame.hasText) {
+          type = 'text';
         }
-      }
-      await context.sync();
 
-      for (const shape of slideShapes.items) {
         const bounds: Bounds = {
           x: shape.left,
           y: shape.top,
@@ -149,21 +154,8 @@ export async function getSlideContext(): Promise<SlideContext | null> {
           height: shape.height,
         };
 
-        let shapeType: ShapeInfo['type'] = 'unknown';
         let hasText = false;
-        let text: string | undefined;
-
-        // 映射形状类型
-        const typeStr = String(shape.type).toLowerCase();
-        if (typeStr.includes('text') || typeStr.includes('placeholder')) {
-          shapeType = 'text';
-        } else if (typeStr.includes('image') || typeStr.includes('picture')) {
-          shapeType = 'image';
-        } else if (typeStr.includes('group')) {
-          shapeType = 'group';
-        } else {
-          shapeType = 'shape';
-        }
+        let text = '';
 
         try {
           if (shape.textFrame && shape.textFrame.hasText) {
@@ -178,7 +170,7 @@ export async function getSlideContext(): Promise<SlideContext | null> {
 
         shapes.push({
           id: shape.id,
-          type: shapeType,
+          type,
           bounds,
           hasText,
           text,
@@ -209,110 +201,50 @@ export async function getSelectionContext(): Promise<SelectionContext> {
           ? (result.value as string)
           : '';
 
-        // 尝试获取更多上下文
-        let slideId: string | undefined;
-        let shapeId: string | undefined;
-        let textStyle: TextStyle | undefined;
+        // 尝试获取选中的形状信息
+        PowerPoint.run(async (context) => {
+          const presentation = context.presentation;
+          const selectedSlides = presentation.getSelectedSlides();
+          selectedSlides.load('items');
+          await context.sync();
 
-        try {
-          await PowerPoint.run(async (context) => {
-            const selectedSlides = context.presentation.getSelectedSlides();
-            selectedSlides.load('items');
-            await context.sync();
+          if (selectedSlides.items.length === 0) {
+            resolve({ text });
+            return;
+          }
 
-            if (selectedSlides.items.length > 0) {
-              const slide = selectedSlides.items[0];
-              slide.load('id');
-              await context.sync();
-              slideId = slide.id;
+          const slide = selectedSlides.items[0];
+          slide.load('id');
+          await context.sync();
 
-              // 尝试获取选中的形状（需要较新版本的 PowerPointApi）
-              const shapesAny = slide.shapes as any;
-              if (typeof shapesAny.getSelectedShapes !== 'function') {
-                return; // API 不支持
-              }
-              const selectedShapes = shapesAny.getSelectedShapes();
-              selectedShapes.load('items');
-              await context.sync();
-
-              if (selectedShapes.items.length > 0) {
-                const shape = selectedShapes.items[0];
-                shape.load('id');
-                await context.sync();
-                shapeId = shape.id;
-
-                // 尝试获取文本样式
-                try {
-                  if (shape.textFrame && shape.textFrame.textRange) {
-                    const font = shape.textFrame.textRange.font;
-                    font.load(['name', 'size', 'color', 'bold', 'italic', 'underline']);
-                    await context.sync();
-
-                    textStyle = {
-                      fontFamily: font.name,
-                      fontSize: font.size,
-                      bold: font.bold,
-                      italic: font.italic,
-                      underline: font.underline ? true : false,
-                    };
-
-                    // 颜色处理
-                    if (font.color) {
-                      textStyle.color = `#${font.color}`;
-                    }
-                  }
-                } catch {
-                  // 无法获取文本样式
-                }
-              }
-            }
+          resolve({
+            slideId: slide.id,
+            text,
           });
-        } catch {
-          // PowerPoint API 不可用，使用基础信息
-        }
-
-        resolve({
-          slideId,
-          shapeId,
-          text: text || undefined,
-          textStyle,
+        }).catch(() => {
+          resolve({ text });
         });
       }
     );
   });
 }
 
-// 获取主题信息（尽可能读取）
-export async function getThemeSpec(): Promise<ThemeSpec | null> {
-  return new Promise((resolve) => {
-    PowerPoint.run(async (context) => {
-      // PowerPoint JS API 对主题的支持有限
-      // 这里返回一个基于常见 Office 主题的默认值
-      // 实际项目中可能需要通过其他方式获取主题信息
-
-      resolve({
-        name: 'Office Default',
-        fonts: {
-          heading: 'Calibri Light',
-          body: 'Calibri',
-        },
-        colors: {
-          primary: '#0078D4',
-          text: '#333333',
-          background: '#FFFFFF',
-          accent: '#A855F7',
-        },
-      });
-    }).catch(() => {
-      resolve(null);
-    });
-  });
+// 辅助函数：从文本中提取标题（第一行或前50字符）
+function extractTitle(text: string): string {
+  if (!text) return '';
+  const firstLine = text.split('\n')[0];
+  return firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
 }
 
-// 从选区获取文本样式
-export async function getTextStyleFromSelection(): Promise<TextStyle | null> {
-  const selectionContext = await getSelectionContext();
-  return selectionContext.textStyle || null;
+// 辅助函数：描述图片位置
+function describeImageLocation(bounds: Bounds, slideWidth: number, slideHeight: number): string {
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+
+  const horizontal = centerX < slideWidth / 3 ? '左' : centerX > slideWidth * 2 / 3 ? '右' : '中';
+  const vertical = centerY < slideHeight / 3 ? '上' : centerY > slideHeight * 2 / 3 ? '下' : '中';
+
+  return `${vertical}${horizontal}`;
 }
 
 // 获取幻灯片的所有文本内容（用于 AI 上下文理解）
@@ -340,38 +272,21 @@ export async function getSlideTextContent(): Promise<string> {
     return textFromCurrentSlide;
   }
 
-  console.log('[getSlideTextContent] All methods failed, returning fallback message');
-  return `[当前演示文稿包含 ${await getSlideCount()} 页幻灯片，但无法读取文本内容。请选中文本后重试。]`;
+  console.log('[getSlideTextContent] No text found');
+  return '';
 }
 
-// 获取幻灯片数量
-async function getSlideCount(): Promise<number> {
-  return new Promise((resolve) => {
-    PowerPoint.run(async (context) => {
-      const slides = context.presentation.slides;
-      slides.load('items');
-      await context.sync();
-      resolve(slides.items.length);
-    }).catch(() => resolve(0));
-  });
-}
-
-// 方法 1: 通过选中内容获取文本
+// 方法 1: 通过选区获取文本
 async function getTextViaSelection(): Promise<string> {
   return new Promise((resolve) => {
-    // 尝试获取当前选中的文本
     Office.context.document.getSelectedDataAsync(
       Office.CoercionType.Text,
       (result) => {
         if (result.status === Office.AsyncResultStatus.Succeeded && result.value) {
-          const text = String(result.value).trim();
-          if (text) {
-            console.log('[getTextViaSelection] Got selected text:', text.substring(0, 100));
-            resolve(text);
-            return;
-          }
+          resolve(result.value as string);
+        } else {
+          resolve('');
         }
-        resolve('');
       }
     );
   });
@@ -381,150 +296,330 @@ async function getTextViaSelection(): Promise<string> {
 async function getTextViaShapes(): Promise<string> {
   return new Promise((resolve) => {
     PowerPoint.run(async (context) => {
-      try {
-        const presentation = context.presentation;
-        const slides = presentation.slides;
-        slides.load('items');
+      const presentation = context.presentation;
+      const selectedSlides = presentation.getSelectedSlides();
+      selectedSlides.load('items');
+      await context.sync();
+
+      if (selectedSlides.items.length === 0) {
+        resolve('');
+        return;
+      }
+
+      const slide = selectedSlides.items[0];
+      slide.load('shapes');
+      await context.sync();
+
+      const shapes = slide.shapes;
+      shapes.load('items');
+      await context.sync();
+
+      const texts: string[] = [];
+
+      for (const shape of shapes.items) {
+        shape.load(['textFrame']);
         await context.sync();
 
-        console.log('[getTextViaShapes] Total slides:', slides.items.length);
-
-        if (slides.items.length === 0) {
-          resolve('');
-          return;
-        }
-
-        const textParts: string[] = [];
-
-        for (let slideIdx = 0; slideIdx < slides.items.length; slideIdx++) {
-          try {
-            const slide = slides.items[slideIdx];
-            const shapes = slide.shapes;
-            shapes.load('items');
+        try {
+          if (shape.textFrame && shape.textFrame.hasText) {
+            shape.textFrame.textRange.load('text');
             await context.sync();
-
-            const slideTexts: string[] = [];
-
-            for (let shapeIdx = 0; shapeIdx < shapes.items.length; shapeIdx++) {
-              const shape = shapes.items[shapeIdx];
-              try {
-                shape.load(['type', 'name']);
-                await context.sync();
-
-                // 尝试多种方式获取文本
-                const text = await tryGetShapeText(context, shape);
-                if (text) {
-                  console.log(`[getTextViaShapes] Slide ${slideIdx + 1}, Shape ${shapeIdx} (${shape.name}): "${text.substring(0, 30)}..."`);
-                  slideTexts.push(text);
-                }
-              } catch (e) {
-                // 忽略单个形状的错误
-              }
+            if (shape.textFrame.textRange.text) {
+              texts.push(shape.textFrame.textRange.text);
             }
-
-            if (slideTexts.length > 0) {
-              textParts.push(`[幻灯片 ${slideIdx + 1}]\n${slideTexts.join('\n')}`);
-            }
-          } catch (e) {
-            console.error(`[getTextViaShapes] Slide ${slideIdx + 1} error:`, e);
           }
+        } catch {
+          // 忽略无法读取文本的形状
         }
-
-        resolve(textParts.join('\n\n'));
-      } catch (error) {
-        console.error('[getTextViaShapes] Error:', error);
-        resolve('');
       }
-    }).catch((error) => {
-      console.error('[getTextViaShapes] PowerPoint.run error:', error);
+
+      resolve(texts.join('\n\n'));
+    }).catch(() => {
       resolve('');
     });
   });
 }
 
-// 方法 3: 获取当前幻灯片的文本
+// 方法 3: 通过 SlideScope 获取当前幻灯片文本
 async function getTextFromCurrentSlide(): Promise<string> {
-  return new Promise((resolve) => {
-    PowerPoint.run(async (context) => {
-      try {
-        // 获取当前选中的幻灯片
-        const selectedSlides = context.presentation.getSelectedSlides();
-        selectedSlides.load('items');
-        await context.sync();
-
-        if (selectedSlides.items.length === 0) {
-          resolve('');
-          return;
-        }
-
-        const slideTexts: string[] = [];
-
-        for (const slide of selectedSlides.items) {
-          const shapes = slide.shapes;
-          shapes.load('items');
-          await context.sync();
-
-          for (const shape of shapes.items) {
-            try {
-              const text = await tryGetShapeText(context, shape);
-              if (text) {
-                slideTexts.push(text);
-              }
-            } catch {
-              // 忽略
-            }
-          }
-        }
-
-        resolve(slideTexts.join('\n\n'));
-      } catch (error) {
-        console.error('[getTextFromCurrentSlide] Error:', error);
-        resolve('');
-      }
-    }).catch(() => resolve(''));
-  });
-}
-
-// 尝试获取形状的文本内容
-async function tryGetShapeText(
-  context: PowerPoint.RequestContext,
-  shape: PowerPoint.Shape
-): Promise<string> {
-  // 尝试方法 1: 直接访问 textFrame.textRange.text
-  try {
-    const textRange = shape.textFrame.textRange;
-    textRange.load('text');
-    await context.sync();
-    const text = textRange.text?.trim();
-    if (text) return text;
-  } catch {
-    // 方法 1 失败
-  }
-
-  // 尝试方法 2: 先加载 textFrame
-  try {
-    shape.load('textFrame');
-    await context.sync();
-
-    if (shape.textFrame) {
-      shape.textFrame.load('textRange');
-      await context.sync();
-
-      if (shape.textFrame.textRange) {
-        shape.textFrame.textRange.load('text');
-        await context.sync();
-        const text = shape.textFrame.textRange.text?.trim();
-        if (text) return text;
-      }
-    }
-  } catch {
-    // 方法 2 失败
-  }
-
+  // 这个方法在 PowerPoint 中不可用，返回空字符串
   return '';
 }
 
-// 获取完整的 AI 上下文（用于发送给 LLM）
+/**
+ * 获取演示文稿大纲（结构化摘要）
+ * 仅包含每页的标题和基本信息，用于 token 优化
+ */
+export async function getPresentationOutline(): Promise<{
+  totalSlides: number;
+  slides: Array<{
+    index: number;
+    title: string;
+    hasImages: boolean;
+    textLength: number;
+  }>;
+}> {
+  return new Promise((resolve) => {
+    PowerPoint.run(async (context) => {
+      const presentation = context.presentation;
+      const slides = presentation.slides;
+      slides.load('items');
+      await context.sync();
+
+      const slideInfos: Array<{
+        index: number;
+        title: string;
+        hasImages: boolean;
+        textLength: number;
+      }> = [];
+
+      for (let i = 0; i < slides.items.length; i++) {
+        const slide = slides.items[i];
+        slide.load('shapes');
+        await context.sync();
+
+        const shapes = slide.shapes;
+        shapes.load('items');
+        await context.sync();
+
+        let title = '';
+        let hasImages = false;
+        let textLength = 0;
+
+        for (const shape of shapes.items) {
+          shape.load(['type', 'textFrame']);
+          await context.sync();
+
+          // 检测图片
+          if (shape.type === 'Image') {
+            hasImages = true;
+          }
+
+          // 提取文本
+          try {
+            if (shape.textFrame && shape.textFrame.hasText) {
+              shape.textFrame.textRange.load('text');
+              await context.sync();
+              const text = shape.textFrame.textRange.text;
+              textLength += text.length;
+
+              // 第一个文本框作为标题
+              if (!title && text) {
+                title = extractTitle(text);
+              }
+            }
+          } catch {
+            // 忽略
+          }
+        }
+
+        slideInfos.push({
+          index: i,
+          title: title || `幻灯片 ${i + 1}`,
+          hasImages,
+          textLength,
+        });
+      }
+
+      resolve({
+        totalSlides: slides.items.length,
+        slides: slideInfos,
+      });
+    }).catch(() => {
+      resolve({
+        totalSlides: 0,
+        slides: [],
+      });
+    });
+  });
+}
+
+/**
+ * 获取当前幻灯片的详细信息（结构化）
+ * 包含完整文本和图片描述
+ */
+export async function getCurrentSlideDetail(): Promise<{
+  index: number;
+  title: string;
+  fullText: string;
+  shapes: Array<{
+    id: string;
+    type: 'text' | 'image' | 'shape' | 'group' | 'unknown';
+    bounds: Bounds;
+    text?: string;
+    imageDescription?: string;
+  }>;
+} | null> {
+  return new Promise((resolve) => {
+    PowerPoint.run(async (context) => {
+      const presentation = context.presentation;
+      const selectedSlides = presentation.getSelectedSlides();
+      selectedSlides.load('items');
+      await context.sync();
+
+      if (selectedSlides.items.length === 0) {
+        resolve(null);
+        return;
+      }
+
+      const slide = selectedSlides.items[0];
+      slide.load(['id', 'shapes']);
+      await context.sync();
+
+      // 获取索引
+      const slides = presentation.slides;
+      slides.load('items');
+      await context.sync();
+
+      let slideIndex = 0;
+      for (let i = 0; i < slides.items.length; i++) {
+        slides.items[i].load('id');
+      }
+      await context.sync();
+
+      for (let i = 0; i < slides.items.length; i++) {
+        if (slides.items[i].id === slide.id) {
+          slideIndex = i;
+          break;
+        }
+      }
+
+      // 获取形状
+      const shapeItems = slide.shapes;
+      shapeItems.load('items');
+      await context.sync();
+
+      const shapes: Array<{
+        id: string;
+        type: 'text' | 'image' | 'shape' | 'group' | 'unknown';
+        bounds: Bounds;
+        text?: string;
+        imageDescription?: string;
+      }> = [];
+
+      let title = '';
+      const textParts: string[] = [];
+
+      for (const shape of shapeItems.items) {
+        shape.load(['id', 'type', 'left', 'top', 'width', 'height', 'textFrame']);
+        await context.sync();
+
+        const shapeType = shape.type as string;
+        let type: 'text' | 'image' | 'shape' | 'group' | 'unknown' = 'unknown';
+
+        const bounds: Bounds = {
+          x: shape.left,
+          y: shape.top,
+          width: shape.width,
+          height: shape.height,
+        };
+
+        if (shapeType === 'Image') {
+          type = 'image';
+          const location = describeImageLocation(bounds, 960, 540);
+          shapes.push({
+            id: shape.id,
+            type,
+            bounds,
+            imageDescription: `图片位于${location}，尺寸 ${Math.round(bounds.width)}×${Math.round(bounds.height)} pt`,
+          });
+        } else {
+          if (shapeType === 'GeometricShape') {
+            type = 'shape';
+          } else if (shapeType === 'Group') {
+            type = 'group';
+          }
+
+          try {
+            if (shape.textFrame && shape.textFrame.hasText) {
+              type = 'text';
+              shape.textFrame.textRange.load('text');
+              await context.sync();
+              const text = shape.textFrame.textRange.text;
+
+              if (!title && text) {
+                title = extractTitle(text);
+              }
+
+              textParts.push(text);
+
+              shapes.push({
+                id: shape.id,
+                type,
+                bounds,
+                text,
+              });
+            } else {
+              shapes.push({
+                id: shape.id,
+                type,
+                bounds,
+              });
+            }
+          } catch {
+            shapes.push({
+              id: shape.id,
+              type,
+              bounds,
+            });
+          }
+        }
+      }
+
+      resolve({
+        index: slideIndex,
+        title: title || `幻灯片 ${slideIndex + 1}`,
+        fullText: textParts.join('\n\n'),
+        shapes,
+      });
+    }).catch(() => {
+      resolve(null);
+    });
+  });
+}
+
+/**
+ * 获取结构化的 AI 上下文（优化版）
+ * 使用分层结构减少 token 消耗
+ */
+export async function getStructuredAIContext(): Promise<{
+  outline: {
+    totalSlides: number;
+    slides: Array<{
+      index: number;
+      title: string;
+      hasImages: boolean;
+      textLength: number;
+    }>;
+  };
+  currentSlide: {
+    index: number;
+    title: string;
+    fullText: string;
+    shapes: Array<{
+      id: string;
+      type: 'text' | 'image' | 'shape' | 'group' | 'unknown';
+      bounds: Bounds;
+      text?: string;
+      imageDescription?: string;
+    }>;
+  } | null;
+  theme: ThemeSpec | null;
+}> {
+  const [outline, currentSlide, theme] = await Promise.all([
+    getPresentationOutline(),
+    getCurrentSlideDetail(),
+    getThemeSpec(),
+  ]);
+
+  return {
+    outline,
+    currentSlide,
+    theme,
+  };
+}
+
+// 获取完整的 AI 上下文（用于发送给 LLM）- 保留向后兼容
 export async function getAIContext(): Promise<{
   presentationContext: PresentationContext;
   slideContext: SlideContext | null;

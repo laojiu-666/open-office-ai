@@ -64,19 +64,61 @@ function getModelContextLimit(model: string): number {
 }
 
 /**
+ * 简化工具结果，移除大型数据（如 base64 图片）
+ * 用于发送给 LLM 的历史消息，避免 token 超限
+ */
+function simplifyToolResult(result: any): any {
+  if (!result || !result.success || !result.data) {
+    return result;
+  }
+
+  const data = result.data;
+
+  // 如果是图片生成结果
+  if (data.type === 'image' && data.content) {
+    return {
+      success: true,
+      data: {
+        type: 'image',
+        content: '[图片数据已省略]',
+        metadata: data.metadata,
+      },
+    };
+  }
+
+  // 如果是视频生成结果
+  if (data.type === 'video' && data.content) {
+    return {
+      success: true,
+      data: {
+        type: 'video',
+        content: '[视频数据已省略]',
+        metadata: data.metadata,
+      },
+    };
+  }
+
+  // 其他类型直接返回
+  return result;
+}
+
+/**
  * 构建带预算限制的历史消息
  * 从最新消息向前遍历，直到超出预算
+ *
+ * 注意：为了保证工具调用的完整性，如果包含了一个带 toolCalls 的 assistant 消息，
+ * 必须同时包含后续所有对应的 tool 消息
  */
 function buildHistoryMessagesWithBudget(
   messages: ChatMessage[],
   tokenBudget: number
-): Array<{ role: 'user' | 'assistant'; content: string }> {
+): Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; toolCalls?: any; toolCallId?: string }> {
   // 过滤出已完成且有内容的消息
   const completedMessages = messages.filter(
     (m) => m.status === 'completed' && m.content
   );
 
-  const result: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const result: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string; toolCalls?: any; toolCallId?: string }> = [];
   let usedTokens = 0;
 
   // 从最新消息向前遍历
@@ -89,15 +131,89 @@ function buildHistoryMessagesWithBudget(
       break;
     }
 
-    // 添加到结果（插入到开头以保持顺序）
-    result.unshift({
-      role: msg.role as 'user' | 'assistant',
+    // 构建消息对象
+    const messageObj: { role: 'system' | 'user' | 'assistant' | 'tool'; content: string; toolCalls?: any; toolCallId?: string } = {
+      role: msg.role as 'system' | 'user' | 'assistant' | 'tool',
       content: msg.content,
-    });
+    };
+
+    // 如果是 assistant 消息且有 toolCalls，添加 toolCalls
+    if (msg.role === 'assistant' && msg.metadata?.toolCalls) {
+      messageObj.toolCalls = msg.metadata.toolCalls;
+    }
+
+    // 如果是 tool 消息，添加 toolCallId
+    if (msg.role === 'tool' && msg.metadata?.toolCallId) {
+      messageObj.toolCallId = msg.metadata.toolCallId;
+    }
+
+    // 添加到结果（插入到开头以保持顺序）
+    result.unshift(messageObj);
     usedTokens += msgTokens;
   }
 
-  return result;
+  // 验证消息完整性：如果有 assistant 消息带 toolCalls，确保后续有对应的 tool 消息
+  // 如果不完整，移除这些不完整的消息
+  const validatedResult: typeof result = [];
+  let expectingToolMessages = false;
+  let expectedToolCallIds: Set<string> = new Set();
+
+  for (const msg of result) {
+    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+      // 开始期待 tool 消息
+      expectingToolMessages = true;
+      expectedToolCallIds = new Set(msg.toolCalls.map((tc: any) => tc.id));
+      validatedResult.push(msg);
+    } else if (msg.role === 'tool' && expectingToolMessages) {
+      // 检查这个 tool 消息是否匹配预期的 toolCallId
+      if (msg.toolCallId && expectedToolCallIds.has(msg.toolCallId)) {
+        expectedToolCallIds.delete(msg.toolCallId);
+        validatedResult.push(msg);
+
+        // 如果所有预期的 tool 消息都收到了，结束期待
+        if (expectedToolCallIds.size === 0) {
+          expectingToolMessages = false;
+        }
+      }
+    } else if (expectingToolMessages) {
+      // 如果还在期待 tool 消息，但遇到了其他类型的消息，说明消息不完整
+      // 移除之前添加的 assistant 消息和部分 tool 消息
+      let lastAssistantIndex = -1;
+      for (let i = validatedResult.length - 1; i >= 0; i--) {
+        if (validatedResult[i].role === 'assistant' && validatedResult[i].toolCalls) {
+          lastAssistantIndex = i;
+          break;
+        }
+      }
+      if (lastAssistantIndex !== -1) {
+        validatedResult.splice(lastAssistantIndex);
+      }
+      expectingToolMessages = false;
+      expectedToolCallIds.clear();
+
+      // 添加当前消息
+      validatedResult.push(msg);
+    } else {
+      // 正常消息
+      validatedResult.push(msg);
+    }
+  }
+
+  // 如果最后还在期待 tool 消息，说明消息不完整，移除最后的 assistant 消息
+  if (expectingToolMessages) {
+    let lastAssistantIndex = -1;
+    for (let i = validatedResult.length - 1; i >= 0; i--) {
+      if (validatedResult[i].role === 'assistant' && validatedResult[i].toolCalls) {
+        lastAssistantIndex = i;
+        break;
+      }
+    }
+    if (lastAssistantIndex !== -1) {
+      validatedResult.splice(lastAssistantIndex);
+    }
+  }
+
+  return validatedResult;
 }
 
 export function useLLMStream() {
@@ -126,6 +242,30 @@ export function useLLMStream() {
         selectedText?: string;
         slideText?: string;
         theme?: { fonts?: { heading?: string; body?: string }; colors?: Record<string, string> };
+        structuredPPT?: {
+          outline: {
+            totalSlides: number;
+            slides: Array<{
+              index: number;
+              title: string;
+              hasImages: boolean;
+              textLength: number;
+            }>;
+          };
+          currentSlide: {
+            index: number;
+            title: string;
+            fullText: string;
+            shapes: Array<{
+              id: string;
+              type: 'text' | 'image' | 'shape' | 'group' | 'unknown';
+              bounds: any;
+              text?: string;
+              imageDescription?: string;
+            }>;
+          } | null;
+          theme: any;
+        };
       }
     ) => {
       // 优先使用新版连接系统
@@ -197,24 +337,97 @@ export function useLLMStream() {
         });
       } else {
         // 普通对话系统提示 + 工具说明
+        // 构建结构化的 PPT 上下文描述
+        let pptContextDescription = '';
+
+        if (context?.structuredPPT) {
+          const { outline, currentSlide, theme } = context.structuredPPT;
+
+          // PPT 大纲
+          if (outline && outline.totalSlides > 0) {
+            pptContextDescription += `\n## 演示文稿大纲\n总共 ${outline.totalSlides} 页幻灯片：\n`;
+            outline.slides.forEach((slide) => {
+              const imageIndicator = slide.hasImages ? ' 📷' : '';
+              pptContextDescription += `- 第 ${slide.index + 1} 页: ${slide.title}${imageIndicator}\n`;
+            });
+          }
+
+          // 当前幻灯片详情
+          if (currentSlide) {
+            pptContextDescription += `\n## 当前幻灯片（第 ${currentSlide.index + 1} 页）\n`;
+            pptContextDescription += `标题: ${currentSlide.title}\n\n`;
+
+            if (currentSlide.fullText) {
+              // 限制文本长度，避免超出预算
+              const maxTextLength = 1000;
+              const text = currentSlide.fullText.length > maxTextLength
+                ? currentSlide.fullText.substring(0, maxTextLength) + '...'
+                : currentSlide.fullText;
+              pptContextDescription += `文本内容:\n${text}\n\n`;
+            }
+
+            // 图片描述
+            const images = currentSlide.shapes.filter(s => s.type === 'image');
+            if (images.length > 0) {
+              pptContextDescription += `图片信息:\n`;
+              images.forEach((img, idx) => {
+                pptContextDescription += `  ${idx + 1}. ${img.imageDescription || '图片'}\n`;
+              });
+            }
+          }
+
+          // 主题信息
+          if (theme) {
+            pptContextDescription += `\n## 主题\n`;
+            pptContextDescription += `字体: 标题 ${theme.fonts?.heading || 'Calibri Light'}, 正文 ${theme.fonts?.body || 'Calibri'}\n`;
+          }
+        }
+
         systemPrompt = `你是一个专业的 Office 文档助手。
 
 你可以使用以下工具来完成任务：
+
+**文本和内容生成：**
 - generate_text: 生成文本内容（回答问题、改写、翻译、总结等）
 - generate_image: 生成图片（插图、配图、视觉内容）
 - generate_video: 生成视频（动画、演示）
-- create_slide: 创建幻灯片
-- generate_and_insert_image: 生成图片并插入到当前幻灯片
-- 其他 PowerPoint 操作工具
 
-根据用户需求自动选择合适的工具。例如：
-- "帮我改写这段话" → 使用 generate_text
-- "画一张日落的图" → 使用 generate_image
-- "做一个产品演示视频" → 使用 generate_video
-- "创建一个关于AI的幻灯片，配上图片" → 使用 create_slide（包含图片）
+**幻灯片操作（重要 - 请仔细区分使用场景）：**
+
+1. **创建新幻灯片** - 使用 ppt_create_slide
+   - 用户说："创建一页新的"、"生成一张幻灯片"、"新建一页"
+   - 这会在演示文稿中添加一张新幻灯片
+
+2. **完全重做当前页面** - 使用 ppt_replace_slide_content
+   - 用户说："重新设计这一页"、"美化当前页面"、"重做这一页"、"重新生成当前页"
+   - ⚠️ 警告：这会清空当前页面的所有内容，然后重新生成
+   - 只有在用户明确要求"重做整个页面"时才使用此工具
+
+3. **部分修改当前页面** - 使用 ppt_update_slide_element
+   - 用户说："把标题改成..."、"修改正文为..."、"更新标题"
+   - 这只会修改指定的元素（标题/正文），保留其他内容
+   - 这是最安全的选择，不会意外删除用户内容
+
+4. **增量添加内容** - 使用 ppt_insert_image 或 ppt_generate_and_insert_image
+   - 用户说："添加一张图片"、"插入一个图表"
+   - 这会在现有内容基础上添加新元素，不影响现有内容
+
+**决策原则（非常重要）：**
+- 如果不确定用户意图，优先使用 ppt_update_slide_element（部分修改），避免使用 ppt_replace_slide_content
+- 只有在用户明确说"重做"、"重新设计"、"美化整个页面"时，才使用 ppt_replace_slide_content
+- 如果用户只是想修改某个元素，使用 ppt_update_slide_element
+- 如果用户想添加新内容，使用插入工具
+
+**示例：**
+- "帮我改写这段话" → generate_text
+- "画一张日落的图" → generate_image
+- "创建一个关于AI的幻灯片" → ppt_create_slide
+- "重新设计当前页面，让它更专业" → ppt_replace_slide_content
+- "把标题改成'产品介绍'" → ppt_update_slide_element (elementType: 'title')
+- "在当前页添加一张图片" → ppt_generate_and_insert_image
 
 ${context?.selectedText ? `\n用户当前选中的文本：\n"""${context.selectedText}"""` : ''}
-${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` : ''}
+${pptContextDescription}
 
 请根据用户意图选择最合适的工具，直接输出结果，不要添加额外的解释。`;
       }
@@ -224,15 +437,39 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
       const totalBudget = Math.floor(modelLimit * CONTEXT_USAGE_RATIO);
       const systemTokens = estimateTokens(systemPrompt);
       const userTokens = estimateTokens(userContent);
-      const docContextTokens = Math.min(
-        estimateTokens(context?.selectedText || '') + estimateTokens(context?.slideText || ''),
-        DOC_CONTEXT_RESERVE
-      );
-      // 历史消息可用预算 = 总预算 - 系统提示 - 用户输入 - 文档上下文预留
+
+      // 计算 PPT 上下文的实际 token 消耗
+      let pptContextTokens = 0;
+      if (context?.structuredPPT) {
+        // 估算大纲 tokens（每页约 20 字符）
+        const outlineTokens = context.structuredPPT.outline
+          ? context.structuredPPT.outline.totalSlides * 10
+          : 0;
+
+        // 估算当前页详情 tokens
+        const currentSlideTokens = context.structuredPPT.currentSlide
+          ? estimateTokens(context.structuredPPT.currentSlide.fullText || '') + 100 // 100 为图片描述预留
+          : 0;
+
+        pptContextTokens = outlineTokens + currentSlideTokens;
+      }
+
+      const selectedTextTokens = estimateTokens(context?.selectedText || '');
+
+      // 历史消息可用预算 = 总预算 - 系统提示 - 用户输入 - PPT上下文 - 选中文本 - 预留
       const historyBudget = Math.max(
         0,
-        totalBudget - systemTokens - userTokens - docContextTokens - SYSTEM_PROMPT_RESERVE
+        totalBudget - systemTokens - userTokens - pptContextTokens - selectedTextTokens - SYSTEM_PROMPT_RESERVE
       );
+
+      console.log('[useLLMStream] Token budget:', {
+        total: totalBudget,
+        system: systemTokens,
+        user: userTokens,
+        pptContext: pptContextTokens,
+        selectedText: selectedTextTokens,
+        history: historyBudget,
+      });
 
       // Build messages array with budget-limited history
       const history = buildHistoryMessagesWithBudget(historyMessages, historyBudget);
@@ -340,14 +577,17 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
 
                 const duration = Date.now() - startTime;
 
+                // 为 LLM 准备简化的工具结果（移除大型数据）
+                const simplifiedResult = simplifyToolResult(result);
+
                 // 更新工具消息为成功/失败
                 updateMessage(toolMsgId, {
-                  content: result.success ? JSON.stringify(result.data) : result.error || '执行失败',
+                  content: result.success ? JSON.stringify(simplifiedResult) : result.error || '执行失败',
                   status: result.success ? 'completed' : 'error',
                   metadata: {
                     toolName: toolCall.name,
                     toolCallId: toolCall.id,
-                    toolResult: result,
+                    toolResult: result, // 完整结果存储在 metadata 中
                     parsingError: toolCall.parsingError,
                   },
                 });
@@ -368,11 +608,11 @@ ${context?.slideText ? `\n当前幻灯片内容：\n"""${context.slideText}"""` 
                   parsingError: toolCall.parsingError,
                 });
 
-                // 收集工具结果用于下一次 LLM 调用
+                // 收集工具结果用于下一次 LLM 调用（使用简化版本）
                 toolMessages.push({
                   role: 'tool',
                   tool_call_id: toolCall.id,
-                  content: JSON.stringify(result),
+                  content: JSON.stringify(simplifiedResult),
                 });
               } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : '未知错误';

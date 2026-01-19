@@ -6,8 +6,10 @@ import {
   setSlideBackground,
   replaceSelectionWithFormat,
   insertTextAtPosition,
+  replaceSlideContent,
+  updateSlideElement,
 } from '@adapters/powerpoint/slide-renderer';
-import { getAIContext } from '@adapters/powerpoint/context';
+import { getAIContext, getPresentationOutline, getCurrentSlideDetail } from '@adapters/powerpoint/context';
 import type { SlideSpec, TextStyle, Bounds } from '@/types';
 import { createImageGenerationProvider } from '@core/image/provider';
 import { useAppStore } from '@ui/store/appStore';
@@ -173,7 +175,8 @@ export function registerPPTTools(registry: ToolRegistry): void {
     }
   );
 
-  // 工具 3: 设置背景
+  // 工具 3: 设置背景 - 已禁用（使用形状插入图片替代）
+  /*
   registry.register(
     {
       name: 'ppt_set_background',
@@ -211,6 +214,7 @@ export function registerPPTTools(registry: ToolRegistry): void {
       }
     }
   );
+  */
 
   // 工具 4: 替换选中文本
   registry.register(
@@ -477,7 +481,8 @@ export function registerPPTTools(registry: ToolRegistry): void {
     }
   );
 
-  // 工具 8: 生成并设置背景
+  // 工具 6: 生成并设置背景 - 已禁用（使用形状插入图片替代）
+  /*
   registry.register(
     {
       name: 'ppt_generate_and_set_background',
@@ -549,6 +554,295 @@ export function registerPPTTools(registry: ToolRegistry): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to generate and set background',
+        };
+      }
+    }
+  );
+  */
+
+  // 工具 7: 获取演示文稿大纲
+  registry.register(
+    {
+      name: 'ppt_get_outline',
+      description: 'Get presentation outline with all slide titles. Use when user asks about the overall structure or wants to know what slides exist.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+    async (): Promise<ToolResult> => {
+      try {
+        const outline = await getPresentationOutline();
+
+        return {
+          success: true,
+          data: {
+            totalSlides: outline.totalSlides,
+            slides: outline.slides.map((slide) => ({
+              index: slide.index + 1, // 1-based for user display
+              title: slide.title,
+              hasImages: slide.hasImages,
+            })),
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get presentation outline',
+        };
+      }
+    }
+  );
+
+  // 工具 8: 获取特定幻灯片的详细信息
+  registry.register(
+    {
+      name: 'ppt_get_slide_detail',
+      description: 'Get detailed information about a specific slide including full text and images. Use when user asks about a specific slide that is not currently selected.',
+      parameters: {
+        type: 'object',
+        properties: {
+          slideIndex: {
+            type: 'number',
+            description: 'Slide index (1-based, e.g., 1 for first slide)',
+          },
+        },
+        required: ['slideIndex'],
+      },
+    },
+    async (args): Promise<ToolResult> => {
+      try {
+        const slideIndex = (args.slideIndex as number) - 1; // Convert to 0-based
+
+        // 注意：PowerPoint API 限制，我们只能获取当前选中的幻灯片详情
+        // 这个工具实际上会返回当前幻灯片的详情
+        // 在未来可以扩展为切换到指定幻灯片后再获取详情
+        const detail = await getCurrentSlideDetail();
+
+        if (!detail) {
+          return {
+            success: false,
+            error: '无法获取幻灯片详情，请确保已选中幻灯片',
+          };
+        }
+
+        // 如果请求的不是当前幻灯片，返回提示
+        if (detail.index !== slideIndex) {
+          return {
+            success: false,
+            error: `当前只能获取已选中幻灯片的详情。当前选中第 ${detail.index + 1} 页，但请求的是第 ${slideIndex + 1} 页。请用户切换到该页后再试。`,
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            index: detail.index + 1, // 1-based
+            title: detail.title,
+            fullText: detail.fullText,
+            images: detail.shapes
+              .filter((s) => s.type === 'image')
+              .map((img) => ({
+                id: img.id,
+                description: img.imageDescription,
+              })),
+            textShapes: detail.shapes
+              .filter((s) => s.type === 'text')
+              .map((txt) => ({
+                id: txt.id,
+                text: txt.text,
+              })),
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get slide detail',
+        };
+      }
+    }
+  );
+
+  // 工具 9: 替换当前幻灯片的所有内容
+  registry.register(
+    {
+      name: 'ppt_replace_slide_content',
+      description: 'Replace ALL content on the current slide with new content. Use ONLY when user explicitly asks to redesign/redo/recreate/beautify the ENTIRE current slide. This will clear all existing shapes and rebuild from scratch. WARNING: This is destructive - use only when user clearly wants to replace everything.',
+      parameters: {
+        type: 'object',
+        properties: {
+          layout: {
+            type: 'string',
+            enum: ['title-content', 'title-image', 'title-only', 'blank'],
+            description: 'Layout template for the new content',
+          },
+          title: {
+            type: 'string',
+            description: 'New slide title',
+          },
+          content: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'New content bullet points',
+          },
+          includeImage: {
+            type: 'boolean',
+            description: 'Whether to include an image',
+          },
+          imagePrompt: {
+            type: 'string',
+            description: 'Image generation prompt (required if includeImage is true)',
+          },
+        },
+        required: ['layout', 'title'],
+      },
+    },
+    async (args): Promise<ToolResult> => {
+      try {
+        const spec: SlideSpec = {
+          version: '1.0',
+          layout: {
+            template: args.layout as any,
+            slots: [],
+          },
+          blocks: [
+            {
+              kind: 'text',
+              slotId: 'title',
+              content: args.title as string,
+            },
+          ],
+          metadata: {
+            requestId: crypto.randomUUID(),
+            createdAt: new Date().toISOString(),
+          },
+        };
+
+        if (args.content && Array.isArray(args.content)) {
+          spec.blocks.push({
+            kind: 'text',
+            slotId: 'body',
+            content: (args.content as string[]).map((item) => `• ${item}`).join('\n'),
+          });
+        }
+
+        if (args.includeImage && args.imagePrompt) {
+          const assetId = `img-${Date.now()}`;
+          spec.blocks.push({
+            kind: 'image',
+            slotId: 'image',
+            prompt: args.imagePrompt as string,
+            assetId,
+          });
+          spec.assets = [
+            {
+              id: assetId,
+              prompt: args.imagePrompt as string,
+              width: 512,
+              height: 512,
+              format: 'png',
+              status: 'pending',
+            },
+          ];
+        }
+
+        const result = await replaceSlideContent(spec);
+        return {
+          success: result.success,
+          data: {
+            slideId: result.slideId,
+            slideIndex: result.slideIndex,
+            message: '已替换当前幻灯片的所有内容',
+          },
+          error: result.error,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to replace slide content',
+        };
+      }
+    }
+  );
+
+  // 工具 10: 更新当前幻灯片的特定元素
+  registry.register(
+    {
+      name: 'ppt_update_slide_element',
+      description: 'Update a specific element (title, body text, or add image) on the current slide without affecting other content. Use when user wants to modify only part of the slide, not replace everything. This is safer than ppt_replace_slide_content as it preserves other elements.',
+      parameters: {
+        type: 'object',
+        properties: {
+          elementType: {
+            type: 'string',
+            enum: ['title', 'body', 'image'],
+            description: 'Type of element to update: "title" for slide title, "body" for main content, "image" to add an image',
+          },
+          content: {
+            type: 'string',
+            description: 'New content for the element. For text elements, this is the new text. For images, this should be base64-encoded image data.',
+          },
+          action: {
+            type: 'string',
+            enum: ['replace', 'append'],
+            description: 'Action to perform: "replace" to replace existing content (default), "append" to add to existing content. Only applies to text elements.',
+          },
+          x: {
+            type: 'number',
+            description: 'X coordinate for image placement (0-960), only used when elementType is "image"',
+          },
+          y: {
+            type: 'number',
+            description: 'Y coordinate for image placement (0-540), only used when elementType is "image"',
+          },
+          width: {
+            type: 'number',
+            description: 'Width for image, only used when elementType is "image"',
+          },
+          height: {
+            type: 'number',
+            description: 'Height for image, only used when elementType is "image"',
+          },
+        },
+        required: ['elementType', 'content'],
+      },
+    },
+    async (args): Promise<ToolResult> => {
+      try {
+        const options: any = {
+          action: (args.action as string) || 'replace',
+        };
+
+        if (args.elementType === 'image' && (args.x || args.y || args.width || args.height)) {
+          options.bounds = {
+            x: (args.x as number) || 50,
+            y: (args.y as number) || 110,
+            width: (args.width as number) || 400,
+            height: (args.height as number) || 300,
+          };
+        }
+
+        const result = await updateSlideElement(
+          args.elementType as 'title' | 'body' | 'image',
+          args.content as string,
+          options
+        );
+
+        return {
+          success: result.success,
+          data: {
+            shapeId: result.shapeId,
+            elementType: args.elementType,
+            action: options.action,
+            message: `已${options.action === 'append' ? '追加' : '更新'}${args.elementType === 'title' ? '标题' : args.elementType === 'body' ? '正文' : '图片'}`,
+          },
+          error: result.error,
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to update slide element',
         };
       }
     }
