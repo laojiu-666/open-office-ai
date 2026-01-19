@@ -3,7 +3,7 @@ import { makeStyles, tokens, Spinner } from '@fluentui/react-components';
 import { Copy24Regular, ArrowSwap24Regular, Add24Regular, SlideAdd24Regular } from '@fluentui/react-icons';
 import type { ChatMessage } from '@/types';
 import { getPowerPointAdapter } from '@adapters/powerpoint';
-import { aiEffects, shadows, createTransition, animation } from '@ui/styles/designTokens';
+import { aiEffects, shadows, createTransition, animation, a11y } from '@ui/styles/designTokens';
 import { SlideGenerationCard } from './cards/SlideGenerationCard';
 import { useSlideGenerator, type GenerationStep } from '@ui/hooks/useSlideGenerator';
 import { ToolExecutionCard } from './ToolExecutionCard';
@@ -16,6 +16,10 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     maxWidth: '100%',
     animation: `fadeInUp ${animation.duration.normal} ${animation.easing.easeOut}`,
+    // 支持 reduced-motion
+    [a11y.reducedMotion]: {
+      animation: 'none',
+    },
   },
   userContainer: {
     alignItems: 'flex-end',
@@ -102,6 +106,16 @@ const useStyles = makeStyles({
     },
     ':active': {
       transform: 'translateY(0)',
+    },
+    // 支持 reduced-motion
+    [a11y.reducedMotion]: {
+      transition: 'none',
+      ':hover': {
+        transform: 'none',
+      },
+      ':active': {
+        transform: 'none',
+      },
     },
   },
   context: {
@@ -280,8 +294,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       </div>
 
       {/* 工具执行结果展示 */}
-      {!isUser && message.metadata?.toolResult && (
-        <>
+      {!isUser && message.metadata?.toolResult && typeof message.metadata.toolResult === 'object' ? (
+        <div>
           {/* 图片生成结果 */}
           {(message.metadata.toolResult as any)?.data?.type === 'image' && (
             <div style={{ marginTop: '12px' }}>
@@ -307,8 +321,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               />
             </div>
           )}
-        </>
-      )}
+        </div>
+      ) : null}
 
       {/* SlideSpec 生成卡片 */}
       {!isUser && message.slideSpec && slideGenStep !== 'idle' && (

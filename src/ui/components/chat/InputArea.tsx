@@ -4,7 +4,7 @@ import { Send24Regular, Stop24Regular } from '@fluentui/react-icons';
 import { useAppStore } from '@ui/store/appStore';
 import { useLLMStream } from '@ui/hooks/useLLMStream';
 import { usePresentationContext } from '@ui/hooks/usePresentationContext';
-import { shadows, layoutDimensions, createTransition } from '@ui/styles/designTokens';
+import { shadows, layoutDimensions, createTransition, a11y } from '@ui/styles/designTokens';
 
 const useStyles = makeStyles({
   wrapper: {
@@ -30,6 +30,10 @@ const useStyles = makeStyles({
       borderBottomColor: tokens.colorBrandStroke1,
       borderLeftColor: tokens.colorBrandStroke1,
       boxShadow: `${shadows.floating}, 0 0 0 2px rgba(0, 120, 212, 0.1)`,
+    },
+    // 支持 reduced-motion
+    [a11y.reducedMotion]: {
+      transition: 'none',
     },
   },
   inputWrapper: {
@@ -83,6 +87,16 @@ const useStyles = makeStyles({
     ':active': {
       transform: 'scale(0.95)',
     },
+    // 支持 reduced-motion
+    [a11y.reducedMotion]: {
+      transition: 'none',
+      ':hover': {
+        transform: 'none',
+      },
+      ':active': {
+        transform: 'none',
+      },
+    },
   },
   stopButton: {
     minWidth: '36px',
@@ -90,15 +104,22 @@ const useStyles = makeStyles({
     height: '36px',
     borderRadius: '50%',
     padding: 0,
-    backgroundColor: tokens.colorPaletteRedBackground3,
-    color: tokens.colorNeutralForegroundOnBrand,
     transition: createTransition(['transform', 'background-color'], 'fast'),
     ':hover': {
-      backgroundColor: tokens.colorPaletteRedForeground1,
       transform: 'scale(1.05)',
     },
     ':active': {
       transform: 'scale(0.95)',
+    },
+    // 支持 reduced-motion
+    [a11y.reducedMotion]: {
+      transition: 'none',
+      ':hover': {
+        transform: 'none',
+      },
+      ':active': {
+        transform: 'none',
+      },
     },
   },
 });
@@ -110,7 +131,7 @@ export function InputArea() {
   const isStreaming = useAppStore((state) => state.isStreaming);
   const currentSelection = useAppStore((state) => state.currentSelection);
   const { sendMessage, stopStream } = useLLMStream();
-  const { getFullAIContext } = usePresentationContext();
+  const { getStructuredAIContext } = usePresentationContext();
 
   const handleSend = async () => {
     const trimmed = input.trim();
@@ -118,19 +139,13 @@ export function InputArea() {
 
     setInput('');
 
-    // 获取完整的 PPT 上下文
-    const aiContext = await getFullAIContext();
-    console.log('[InputArea] aiContext:', aiContext);
+    // 获取结构化的 PPT 上下文（优化版）
+    const structuredContext = await getStructuredAIContext();
+    console.log('[InputArea] structuredContext:', structuredContext);
 
     const contextToSend = {
       selectedText: currentSelection || undefined,
-      slideText: aiContext.slideText || undefined,
-      theme: aiContext.theme
-        ? {
-            fonts: aiContext.theme.fonts,
-            colors: aiContext.theme.colors,
-          }
-        : undefined,
+      structuredPPT: structuredContext,
     };
     console.log('[InputArea] contextToSend:', contextToSend);
 

@@ -63,6 +63,16 @@ export const animation = {
   },
 } as const;
 
+// 可访问性配置
+export const a11y = {
+  // 减少动画媒体查询
+  reducedMotion: '@media (prefers-reduced-motion: reduce)',
+  // 最小对比度（WCAG AA 标准）
+  minContrast: 4.5,
+  // 最小触摸目标尺寸（44x44px）
+  minTouchTarget: '44px',
+} as const;
+
 // 间距系统
 export const spacing = {
   xs: '4px',
@@ -94,6 +104,25 @@ export const createTransition = (
   return properties
     .map((prop) => `${prop} ${animation.duration[duration]} ${animation.easing[easing]}`)
     .join(', ');
+};
+
+/**
+ * 创建支持 reduced-motion 的样式对象
+ * @param styles 正常样式
+ * @param reducedStyles 减少动画时的样式（可选，默认移除所有动画）
+ */
+export const withReducedMotion = (
+  styles: Record<string, any>,
+  reducedStyles?: Record<string, any>
+) => {
+  return {
+    ...styles,
+    [a11y.reducedMotion]: reducedStyles || {
+      transition: 'none',
+      animation: 'none',
+      transform: 'none',
+    },
+  };
 };
 
 // 渐变边框伪元素样式
