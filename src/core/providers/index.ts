@@ -3,9 +3,11 @@
  * 统一导出所有适配器和注册表
  */
 
-export { ProviderAdapter, BaseProviderAdapter } from './adapter';
+export type { ProviderAdapter } from './adapter';
+export { BaseProviderAdapter } from './adapter';
 export { ProviderRegistry, initializeRegistry, getRegistry } from './registry';
 export { ProviderErrorClass, createProviderError } from './errors';
+export { ProviderExecutor } from './executor';
 
 // 核心供应商适配器
 export { OpenAIAdapter } from './adapters/openai';

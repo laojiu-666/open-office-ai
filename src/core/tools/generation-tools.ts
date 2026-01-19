@@ -1,5 +1,6 @@
 import type { ToolDefinition, GenerationToolResult } from '@/types';
 import type { ToolRegistry, ToolResult } from './registry';
+import type { ImageSize, ImageStyle } from '@core/image/types';
 import { CapabilityRouter } from '@core/capability-router';
 import { createLLMProvider } from '@core/llm/factory';
 import { createImageGenerationProvider } from '@core/image/provider';
@@ -140,8 +141,8 @@ export function registerGenerationTools(registry: ToolRegistry): void {
         console.log('[generate_image] Generating image with prompt:', args.prompt);
         const imageResult = await imageProvider.generate({
           prompt: args.prompt as string,
-          size: (args.size as string) || '1024x1024',
-          style: args.style as 'vivid' | 'natural',
+          size: (args.size as ImageSize) || '1024x1024',
+          style: args.style as ImageStyle,
         });
 
         console.log('[generate_image] Image generated successfully:', imageResult.width, 'x', imageResult.height);

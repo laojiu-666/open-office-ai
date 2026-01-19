@@ -19,6 +19,8 @@ import {
   Edit16Regular,
   Delete16Regular,
   Checkmark16Filled,
+  TextDescription20Regular,
+  Image20Regular,
 } from '@fluentui/react-icons';
 import type { AIConnection } from '@/types';
 import { PROVIDER_PRESETS } from '@core/llm/presets';
@@ -64,6 +66,13 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  capabilities: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '4px',
+    marginBottom: '4px',
+    alignItems: 'center',
   },
   details: {
     display: 'flex',
@@ -137,6 +146,36 @@ export function ConnectionCard({
               )}
               <div className={styles.info}>
                 <Text className={styles.name}>{connection.name}</Text>
+
+                {/* 能力标签 */}
+                <div className={styles.capabilities}>
+                  {/* Text Capability - 始终显示 */}
+                  <Tooltip content={`文本模型: ${connection.model}`} relationship="label">
+                    <Badge icon={<TextDescription20Regular />} appearance="tint" size="small">
+                      文本
+                    </Badge>
+                  </Tooltip>
+
+                  {/* Image Capability - 条件显示 */}
+                  {preset?.capabilities?.includes('image') && (
+                    <Tooltip
+                      content={`图片模型: ${connection.imageModel || connection.capabilities?.image?.model || '未配置'}`}
+                      relationship="label"
+                    >
+                      <Badge
+                        icon={<Image20Regular />}
+                        appearance={connection.imageModel || connection.capabilities?.image?.model ? "tint" : "outline"}
+                        size="small"
+                        style={{
+                          opacity: connection.imageModel || connection.capabilities?.image?.model ? 1 : 0.6
+                        }}
+                      >
+                        图片
+                      </Badge>
+                    </Tooltip>
+                  )}
+                </div>
+
                 <div className={styles.details}>
                   <Badge appearance="outline" size="small">
                     {preset?.label || connection.providerId}

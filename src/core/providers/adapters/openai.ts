@@ -79,6 +79,7 @@ export class OpenAIAdapter extends BaseProviderAdapter {
         size: input.size || '1024x1024',
         n: 1,
         response_format: 'b64_json',
+        ...(input.style ? { style: input.style } : {}),
       },
     };
   }

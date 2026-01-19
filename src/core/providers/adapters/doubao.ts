@@ -88,8 +88,8 @@ export class DoubaoAdapter extends BaseProviderAdapter {
     const images = body.data?.map((item: any) => ({
       data: item.b64_json || item.url,
       format: 'png' as const,
-      width: this.getSizeWidth(item.size || input.size),
-      height: this.getSizeHeight(item.size || input.size),
+      width: this.getSizeWidth(item.size || '1024x1024'),
+      height: this.getSizeHeight(item.size || '1024x1024'),
     })) || [];
 
     return {

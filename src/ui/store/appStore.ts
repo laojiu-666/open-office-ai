@@ -50,12 +50,6 @@ const legacyDefaultProviders: Record<string, ProviderConfig> = {
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
   },
-  anthropic: {
-    providerId: 'anthropic',
-    apiKey: '',
-    baseUrl: 'https://api.anthropic.com',
-    model: 'claude-3-5-sonnet-20241022',
-  },
   custom: {
     providerId: 'custom',
     apiKey: '',
@@ -367,7 +361,7 @@ export const useAppStore = create<AppState>()(
         ];
 
         // 清理现有连接，移除不支持的供应商
-        const cleanedConnections = state.connections
+        const cleanedConnections: AIConnection[] = state.connections
           .filter((conn) => supportedProviders.includes(conn.providerId))
           .map((conn) => {
             // 移除 video 能力

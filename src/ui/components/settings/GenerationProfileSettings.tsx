@@ -12,7 +12,6 @@ import {
   ArrowLeft24Regular,
   TextDescription24Regular,
   Image24Regular,
-  Video24Regular,
 } from '@fluentui/react-icons';
 import { useAppStore } from '@ui/store/appStore';
 import { layoutDimensions, shadows } from '@ui/styles/designTokens';
@@ -166,10 +165,6 @@ export function GenerationProfileSettings() {
     updateGenerationProfile({ imageProvider: value || undefined });
   };
 
-  const handleVideoProviderChange = (value: string) => {
-    updateGenerationProfile({ videoProvider: value || undefined });
-  };
-
   const connectionOptions = connections.map(c => ({ label: c.name, value: c.id }));
 
   return (
@@ -218,16 +213,6 @@ export function GenerationProfileSettings() {
               options={connectionOptions}
               disabled={isAutoMode}
               onChange={handleImageProviderChange}
-            />
-            <CapabilityCard
-              id="cap-video"
-              icon={<Video24Regular />}
-              title="视频生成"
-              description="负责动态背景和演示视频生成（预留功能）"
-              value={generationProfile.videoProvider || ''}
-              options={connectionOptions}
-              disabled={isAutoMode}
-              onChange={handleVideoProviderChange}
             />
           </div>
         </div>

@@ -5,8 +5,9 @@ import {
   getSlideContext,
   getSelectionContext,
   getAIContext,
+  getStructuredAIContext,
 } from '@adapters/powerpoint/context';
-import type { SlideContext, SelectionContext, ThemeSpec } from '@/types';
+import type { SlideContext, SelectionContext, ThemeSpec, Bounds } from '@/types';
 
 interface UsePresentationContextReturn {
   // 基础上下文
@@ -26,6 +27,30 @@ interface UsePresentationContextReturn {
     slideContext: SlideContext | null;
     selectionContext: SelectionContext;
     slideText: string;
+    theme: ThemeSpec | null;
+  }>;
+  getStructuredAIContext: () => Promise<{
+    outline: {
+      totalSlides: number;
+      slides: Array<{
+        index: number;
+        title: string;
+        hasImages: boolean;
+        textLength: number;
+      }>;
+    };
+    currentSlide: {
+      index: number;
+      title: string;
+      fullText: string;
+      shapes: Array<{
+        id: string;
+        type: 'text' | 'image' | 'shape' | 'group' | 'unknown';
+        bounds: Bounds;
+        text?: string;
+        imageDescription?: string;
+      }>;
+    } | null;
     theme: ThemeSpec | null;
   }>;
 
@@ -68,6 +93,11 @@ export function usePresentationContext(): UsePresentationContextReturn {
     return getAIContext();
   }, []);
 
+  // 获取结构化 AI 上下文（优化版）
+  const getStructuredAIContextCallback = useCallback(async () => {
+    return getStructuredAIContext();
+  }, []);
+
   // 初始化时获取上下文
   useEffect(() => {
     refreshContext();
@@ -99,6 +129,7 @@ export function usePresentationContext(): UsePresentationContextReturn {
     selectionContext: selectionContextRef.current,
     refreshContext,
     getFullAIContext,
+    getStructuredAIContext: getStructuredAIContextCallback,
     isLoading: isLoadingRef.current,
   };
 }

@@ -40,7 +40,8 @@
       "Bash(C:/Users/Administrator/.claude/bin/codeagent-wrapper.exe --backend codex resume 019bd01f-ba64-7980-99eb-1bab7ba9c223 - \"F:/web/open-office-ai\")",
       "Bash(echo \"ROLE_FILE: C:/Users/Administrator/.claude/.ccg/prompts/gemini/frontend.md\n\n<TASK>\nRequirements: Implement PPT Function Calling System Enhancements - Frontend Tasks \\(All UI Tasks\\)\n\nBased on the plan in .claude/plan/ppt-function-calling-enhancements.md, implement ALL frontend UI tasks:\n\n**Task 1: Enhanced Error Display in UI \\(P0\\)**\n- Modify src/ui/components/chat/ToolExecutionCard.tsx:\n  - Distinguish parameter parsing errors vs execution errors\n  - Display detailed error info \\(collapsible\\)\n  - Add copy error button\n- Modify src/ui/components/chat/MessageBubble.tsx for fallback warnings\n\n**Task 2: UI State Management for Multi-turn Conversation \\(P0\\)**\n- Modify src/ui/components/settings/SettingsView.tsx: add maxToolCallDepth config option\n\n**Task 4: Tool Call History UI \\(P2\\)**\n- Create src/ui/components/developer/sections/ToolHistorySection.tsx:\n  - Table: Time | Tool | Parameters | Result | Duration | Status\n  - Filtering, search, export to JSON\n- Modify src/ui/components/developer/DeveloperPage.tsx to integrate new section\n\nContext: Retrieved from codebase via ace-tool search_context\nCurrent ToolExecutionCard: lines 64-122 in src/ui/components/chat/ToolExecutionCard.tsx\nCurrent MessageBubble: lines 156-304 in src/ui/components/chat/MessageBubble.tsx\nCurrent appStore: src/ui/store/appStore.ts\nCurrent SettingsView: src/ui/components/settings/SettingsView.tsx\n\nSESSION_ID: 2be26697-247e-4824-b6f0-18b78f88cb74\n</TASK>\n\nOUTPUT: Unified Diff Patch ONLY. Strictly prohibit any actual modifications.\")",
       "Bash(C:/Users/Administrator/.claude/bin/codeagent-wrapper.exe:*)",
-      "mcp__exa__web_search_exa"
+      "mcp__exa__web_search_exa",
+      "Bash(python3:*)"
     ]
   }
 }
