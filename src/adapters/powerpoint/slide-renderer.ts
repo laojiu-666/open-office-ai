@@ -1018,15 +1018,16 @@ export async function replaceSlideContent(spec: SlideSpec): Promise<ApplySlideSp
  * 支持更新标题、正文或添加图片，不影响其他内容
  */
 export async function updateSlideElement(
-  elementType: 'title' | 'body' | 'image',
+  elementType: 'title' | 'body' | 'text' | 'image',
   content: string,
   options?: {
     action?: 'replace' | 'append';
     bounds?: Bounds;
     style?: TextStyle;
+    textIndex?: number;
   }
 ): Promise<{ success: boolean; shapeId?: string; error?: string }> {
-  console.log('[updateSlideElement] Type:', elementType, 'Action:', options?.action || 'replace');
+  console.log('[updateSlideElement] Type:', elementType, 'TextIndex:', options?.textIndex, 'Action:', options?.action || 'replace');
 
   return new Promise((resolve) => {
     PowerPoint.run(async (context) => {
@@ -1087,35 +1088,87 @@ export async function updateSlideElement(
         shapes.load('items');
         await context.sync();
 
+        console.log('[updateSlideElement] Total shapes:', shapes.items.length);
+
         // 批量加载所有形状的基本信息
         for (const shape of shapes.items) {
           shape.load(['id', 'type', 'top', 'left', 'width', 'height']);
         }
         await context.sync();
 
-        // 查找目标形状（根据位置判断）
+        // 调试：输出所有形状信息
+        for (const shape of shapes.items) {
+          console.log('[updateSlideElement] Shape:', {
+            id: shape.id,
+            type: shape.type,
+            top: shape.top,
+            left: shape.left,
+          });
+        }
+
+        // 筛选出所有文本形状并按 top 位置排序
+        // 注意：需要单独检查每个形状是否有 textFrame
+        const textShapes: PowerPoint.Shape[] = [];
+        for (const shape of shapes.items) {
+          try {
+            shape.load('textFrame');
+            await context.sync();
+            if (shape.textFrame) {
+              textShapes.push(shape);
+            }
+          } catch (e) {
+            // 某些形状可能没有 textFrame，忽略错误
+            console.log('[updateSlideElement] Shape has no textFrame:', shape.id);
+          }
+        }
+
+        // 按 top 位置排序
+        textShapes.sort((a, b) => a.top - b.top);
+
+        console.log('[updateSlideElement] Text shapes count:', textShapes.length);
+
+        // 查找目标形状
         let targetShape: PowerPoint.Shape | null = null;
         let targetBounds: Bounds;
 
         if (elementType === 'title') {
+          // 标题：选择最上面的文本形状
+          if (textShapes.length > 0) {
+            targetShape = textShapes[0];
+            console.log('[updateSlideElement] Found title shape (topmost):', {
+              id: targetShape.id,
+              top: targetShape.top,
+            });
+          } else {
+            console.warn('[updateSlideElement] No text shapes found for title');
+          }
           targetBounds = { x: 50, y: 30, width: 860, height: 60 };
-          // 查找顶部的形状（y < 100）
-          for (const shape of shapes.items) {
-            if (shape.top < 100) {
-              targetShape = shape;
-              break;
-            }
+        } else if (elementType === 'body') {
+          // body: 选择第二个文本形状（如果只有一个，则创建新的）
+          if (textShapes.length > 1) {
+            targetShape = textShapes[1];
+            console.log('[updateSlideElement] Found body shape (second):', {
+              id: targetShape.id,
+              top: targetShape.top,
+            });
+          } else {
+            console.warn('[updateSlideElement] No second text shape found for body');
           }
-        } else {
-          // body
           targetBounds = { x: 50, y: 110, width: 860, height: 380 };
-          // 查找中部的形状（y >= 100）
-          for (const shape of shapes.items) {
-            if (shape.top >= 100) {
-              targetShape = shape;
-              break;
-            }
+        } else if (elementType === 'text') {
+          // text: 按 textIndex 选择
+          const index = options?.textIndex ?? 0;
+          if (textShapes.length > index) {
+            targetShape = textShapes[index];
+            console.log('[updateSlideElement] Found text shape by index:', {
+              index,
+              id: targetShape.id,
+              top: targetShape.top,
+            });
+          } else {
+            console.warn('[updateSlideElement] No text shape found at index:', index);
           }
+          targetBounds = { x: 50, y: 110, width: 860, height: 380 };
         }
 
         if (targetShape) {
@@ -1135,31 +1188,86 @@ export async function updateSlideElement(
             await context.sync();
 
             const textRange = targetShape.textFrame.textRange;
-            if (options?.action === 'append') {
-              textRange.load('text');
+
+            // 保留原有格式：先读取当前字体样式
+            let preservedStyle: any = null;
+            try {
+              textRange.load(['text', 'font']);
               await context.sync();
+
+              const originalFont = textRange.font;
+              originalFont.load(['name', 'size', 'bold', 'italic', 'color']);
+              await context.sync();
+
+              // 保存原有样式
+              preservedStyle = {
+                fontFamily: originalFont.name,
+                fontSize: originalFont.size,
+                bold: originalFont.bold,
+                italic: originalFont.italic,
+                color: originalFont.color,
+              };
+
+              console.log('[updateSlideElement] Preserved style:', preservedStyle);
+            } catch (styleError) {
+              console.warn('[updateSlideElement] Failed to read original style:', styleError);
+              // 继续执行，不保留样式
+            }
+
+            // 更新文本内容
+            if (options?.action === 'append') {
               textRange.text = textRange.text + '\n' + content;
             } else {
               textRange.text = content;
             }
 
-            // 应用样式
-            if (options?.style) {
-              textRange.load('font');
-              await context.sync();
-              const font = textRange.font;
+            await context.sync();
 
-              if (options.style.fontFamily) font.name = options.style.fontFamily;
-              if (options.style.fontSize) font.size = options.style.fontSize;
-              if (options.style.bold !== undefined) font.bold = options.style.bold;
-              if (options.style.italic !== undefined) font.italic = options.style.italic;
-              if (options.style.color) {
-                const color = options.style.color.startsWith('#') ? options.style.color.slice(1) : options.style.color;
-                font.color = color;
+            // 重新应用原有样式（因为修改文本后可能丢失格式）
+            if (preservedStyle) {
+              try {
+                textRange.load('font');
+                await context.sync();
+                const font = textRange.font;
+
+                // 优先使用传入的样式，否则使用原有样式
+                if (options?.style) {
+                  if (options.style.fontFamily) font.name = options.style.fontFamily;
+                  else font.name = preservedStyle.fontFamily;
+
+                  if (options.style.fontSize) font.size = options.style.fontSize;
+                  else font.size = preservedStyle.fontSize;
+
+                  if (options.style.bold !== undefined) font.bold = options.style.bold;
+                  else font.bold = preservedStyle.bold;
+
+                  if (options.style.italic !== undefined) font.italic = options.style.italic;
+                  else font.italic = preservedStyle.italic;
+
+                  if (options.style.color) {
+                    const color = options.style.color.startsWith('#')
+                      ? options.style.color.slice(1)
+                      : options.style.color;
+                    font.color = color;
+                  } else {
+                    font.color = preservedStyle.color;
+                  }
+                } else {
+                  // 没有传入样式，完全使用原有样式
+                  font.name = preservedStyle.fontFamily;
+                  font.size = preservedStyle.fontSize;
+                  font.bold = preservedStyle.bold;
+                  font.italic = preservedStyle.italic;
+                  font.color = preservedStyle.color;
+                }
+
+                await context.sync();
+              } catch (applyStyleError) {
+                console.warn('[updateSlideElement] Failed to apply style:', applyStyleError);
+                // 继续执行，样式可能不完整
               }
             }
 
-            await context.sync();
             resolve({ success: true, shapeId: targetShape.id });
             return;
           }

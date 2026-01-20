@@ -391,7 +391,7 @@ export function registerPPTTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: 'ppt_generate_and_insert_image',
-      description: 'Generate an AI image and insert it into the current slide. Use when user wants to generate/create an image for the slide.',
+      description: 'Generate an AI image and insert it into the current slide WITHOUT removing existing content. Use when user wants to ADD/INSERT/APPEND an image (e.g., "add a decorative image", "insert an icon", "add an illustration"). This is NON-DESTRUCTIVE - it preserves all existing content.',
       parameters: {
         type: 'object',
         properties: {
@@ -599,7 +599,7 @@ export function registerPPTTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: 'ppt_get_slide_detail',
-      description: 'Get detailed information about a specific slide including full text and images. Use when user asks about a specific slide that is not currently selected.',
+      description: 'Get detailed information about the current slide including title, full text, text shapes, and images. Use this tool in two scenarios: 1) When user asks about a specific slide content, 2) BEFORE modifying a slide (e.g., before calling ppt_update_slide_element) to understand the current content, format, and structure so you can preserve them when making changes.',
       parameters: {
         type: 'object',
         properties: {
@@ -649,10 +649,12 @@ export function registerPPTTools(registry: ToolRegistry): void {
               })),
             textShapes: detail.shapes
               .filter((s) => s.type === 'text')
-              .map((txt) => ({
+              .map((txt, idx) => ({
+                index: idx, // 0-based index for use with ppt_update_slide_element
                 id: txt.id,
                 text: txt.text,
               })),
+            note: 'Each textShape has an index (0-based). Use this index with ppt_update_slide_element when elementType is "text".',
           },
         };
       } catch (error) {
@@ -668,7 +670,7 @@ export function registerPPTTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: 'ppt_replace_slide_content',
-      description: 'Replace ALL content on the current slide with new content. Use ONLY when user explicitly asks to redesign/redo/recreate/beautify the ENTIRE current slide. This will clear all existing shapes and rebuild from scratch. WARNING: This is destructive - use only when user clearly wants to replace everything.',
+      description: 'Replace ALL content on the current slide with new content. DESTRUCTIVE: This will DELETE all existing shapes and rebuild from scratch. Use ONLY when user explicitly asks to REDESIGN/REDO/RECREATE/BEAUTIFY the ENTIRE current slide. DO NOT use for adding/inserting new elements - use ppt_generate_and_insert_image or ppt_update_slide_element instead.',
       parameters: {
         type: 'object',
         properties: {
@@ -700,10 +702,19 @@ export function registerPPTTools(registry: ToolRegistry): void {
     },
     async (args): Promise<ToolResult> => {
       try {
+        // 如果包含图片，强制使用支持图片的布局
+        let layout = args.layout as string;
+        if (args.includeImage && args.imagePrompt) {
+          if (layout === 'title-content' || layout === 'title-only') {
+            layout = 'title-image'; // 自动切换到支持图片的布局
+            console.log('[ppt_replace_slide_content] Auto-switched layout to title-image for image support');
+          }
+        }
+
         const spec: SlideSpec = {
           version: '1.0',
           layout: {
-            template: args.layout as any,
+            template: layout as any,
             slots: [],
           },
           blocks: [
@@ -770,14 +781,18 @@ export function registerPPTTools(registry: ToolRegistry): void {
   registry.register(
     {
       name: 'ppt_update_slide_element',
-      description: 'Update a specific element (title, body text, or add image) on the current slide without affecting other content. Use when user wants to modify only part of the slide, not replace everything. This is safer than ppt_replace_slide_content as it preserves other elements.',
+      description: 'Update ONE specific text element or add image on the current slide. CRITICAL RULES: 1) This tool updates ONLY ONE text box per call - if user wants to modify multiple elements (e.g., title AND speaker AND date), you MUST call this tool MULTIPLE TIMES, once for each element. 2) When updating text with labels/prefixes (e.g., "Speaker: John"), you MUST output the COMPLETE string including the label (e.g., "Speaker: Mike"), otherwise the label will be lost. 3) Use the textIndex from the context to target specific text boxes. Example: User says "Change title to X, speaker to Y, date to Z" → You must make 3 separate calls with textIndex 0, 1, 2.',
       parameters: {
         type: 'object',
         properties: {
           elementType: {
             type: 'string',
-            enum: ['title', 'body', 'image'],
-            description: 'Type of element to update: "title" for slide title, "body" for main content, "image" to add an image',
+            enum: ['title', 'body', 'text', 'image'],
+            description: 'Type of element to update: "title" for the topmost text (usually slide title), "body" for the second text element (usually main content), "text" for any text element by index (use with textIndex parameter), "image" to add an image',
+          },
+          textIndex: {
+            type: 'number',
+            description: 'Index of the text element to update (0-based, where 0 is the topmost text). Only used when elementType is "text". Use this when you need to update a specific text element that is not the title or body (e.g., subtitle, date, author name).',
           },
           content: {
             type: 'string',
@@ -814,6 +829,11 @@ export function registerPPTTools(registry: ToolRegistry): void {
           action: (args.action as string) || 'replace',
         };
 
+        // 处理 textIndex 参数
+        if (args.elementType === 'text' && args.textIndex !== undefined) {
+          options.textIndex = args.textIndex as number;
+        }
+
         if (args.elementType === 'image' && (args.x || args.y || args.width || args.height)) {
           options.bounds = {
             x: (args.x as number) || 50,
@@ -824,7 +844,7 @@ export function registerPPTTools(registry: ToolRegistry): void {
         }
 
         const result = await updateSlideElement(
-          args.elementType as 'title' | 'body' | 'image',
+          args.elementType as 'title' | 'body' | 'text' | 'image',
           args.content as string,
           options
         );
@@ -834,8 +854,9 @@ export function registerPPTTools(registry: ToolRegistry): void {
           data: {
             shapeId: result.shapeId,
             elementType: args.elementType,
+            textIndex: args.textIndex,
             action: options.action,
-            message: `已${options.action === 'append' ? '追加' : '更新'}${args.elementType === 'title' ? '标题' : args.elementType === 'body' ? '正文' : '图片'}`,
+            message: `已${options.action === 'append' ? '追加' : '更新'}${args.elementType === 'title' ? '标题' : args.elementType === 'body' ? '正文' : args.elementType === 'text' ? `文本框${args.textIndex}` : '图片'}`,
           },
           error: result.error,
         };

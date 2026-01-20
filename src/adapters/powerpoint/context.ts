@@ -566,6 +566,9 @@ export async function getCurrentSlideDetail(): Promise<{
         }
       }
 
+      // 按 top 位置排序 shapes（确保与 updateSlideElement 的排序一致）
+      shapes.sort((a, b) => a.bounds.y - b.bounds.y);
+
       resolve({
         index: slideIndex,
         title: title || `幻灯片 ${slideIndex + 1}`,

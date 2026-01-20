@@ -352,24 +352,30 @@ export function useLLMStream() {
             });
           }
 
-          // 当前幻灯片详情
+          // 当前幻灯片详情（结构化）
           if (currentSlide) {
             pptContextDescription += `\n## 当前幻灯片（第 ${currentSlide.index + 1} 页）\n`;
             pptContextDescription += `标题: ${currentSlide.title}\n\n`;
 
-            if (currentSlide.fullText) {
-              // 限制文本长度，避免超出预算
-              const maxTextLength = 1000;
-              const text = currentSlide.fullText.length > maxTextLength
-                ? currentSlide.fullText.substring(0, maxTextLength) + '...'
-                : currentSlide.fullText;
-              pptContextDescription += `文本内容:\n${text}\n\n`;
+            // 展开所有可编辑元素（关键修复：让 LLM 看到每个文本框的索引）
+            const textShapes = currentSlide.shapes.filter(s => s.type === 'text');
+            if (textShapes.length > 0) {
+              pptContextDescription += `### 可编辑文本元素（按从上到下顺序）：\n`;
+              textShapes.forEach((shape, idx) => {
+                const text = shape.text || '';
+                const preview = text.length > 50 ? text.substring(0, 50) + '...' : text;
+                pptContextDescription += `- [索引 ${idx}] ${preview}\n`;
+              });
+              pptContextDescription += `\n**重要说明**：\n`;
+              pptContextDescription += `- 使用 ppt_update_slide_element 时，elementType='text' 配合 textIndex 参数来指定要修改的元素\n`;
+              pptContextDescription += `- 如果用户要修改多个元素（如标题、分享人、日期），你必须多次调用此工具，每个元素一次\n`;
+              pptContextDescription += `- 修改带标签的字段（如"分享人：张三"）时，必须输出完整字符串（如"分享人：李四"），否则标签会丢失\n\n`;
             }
 
             // 图片描述
             const images = currentSlide.shapes.filter(s => s.type === 'image');
             if (images.length > 0) {
-              pptContextDescription += `图片信息:\n`;
+              pptContextDescription += `### 图片信息：\n`;
               images.forEach((img, idx) => {
                 pptContextDescription += `  ${idx + 1}. ${img.imageDescription || '图片'}\n`;
               });
@@ -418,6 +424,11 @@ export function useLLMStream() {
 - 如果用户只是想修改某个元素，使用 ppt_update_slide_element
 - 如果用户想添加新内容，使用插入工具
 
+**工具调用完成后的行为：**
+- 完成所有必要的工具调用后，你必须输出一条简短的确认消息告诉用户任务已完成
+- 不要重复调用相同的工具
+- 不要在没有新任务的情况下继续调用工具
+
 **示例：**
 - "帮我改写这段话" → generate_text
 - "画一张日落的图" → generate_image
@@ -429,7 +440,7 @@ export function useLLMStream() {
 ${context?.selectedText ? `\n用户当前选中的文本：\n"""${context.selectedText}"""` : ''}
 ${pptContextDescription}
 
-请根据用户意图选择最合适的工具，直接输出结果，不要添加额外的解释。`;
+请根据用户意图选择最合适的工具完成任务，完成后输出简短的确认消息。`;
       }
 
       // 计算历史消息的 token 预算
