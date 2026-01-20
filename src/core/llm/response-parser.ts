@@ -265,21 +265,38 @@ ${contextInfo}${themeInfo}
 }
 \`\`\`
 
-## 布局模板选项
-- "title-only": 仅标题
-- "title-content": 标题 + 内容（默认）
-- "title-two-content": 标题 + 双栏内容
-- "title-image": 标题 + 内容 + 图片
-- "image-caption": 大图 + 说明文字
+## 布局模板与插槽对应关系（重要！）
 
-## 槽位 ID
+### 1. "title-only" - 仅标题
+支持的插槽：
 - "title": 标题
-- "subtitle": 副标题
+
+### 2. "title-content" - 标题 + 内容（默认）
+支持的插槽：
+- "title": 标题
 - "body": 正文内容
-- "body-left": 左侧内容（双栏布局）
-- "body-right": 右侧内容（双栏布局）
+
+### 3. "title-two-content" - 标题 + 双栏内容
+支持的插槽：
+- "title": 标题
+- "body-left": 左侧内容
+- "body-right": 右侧内容
+
+### 4. "title-image" - 标题 + 内容 + 图片
+支持的插槽：
+- "title": 标题
+- "body": 正文内容
+- "image": 图片
+
+### 5. "image-caption" - 大图 + 说明文字
+支持的插槽：
 - "image": 图片
 - "caption": 图片说明
+
+## 重要规则
+1. **如果需要生成图片，必须使用 "title-image" 或 "image-caption" 布局**
+2. 每个 block 的 slotId 必须在所选布局的支持列表中
+3. 不要在不支持图片的布局中添加 image 块
 
 ## 图片块格式
 如果需要生成图片，使用以下格式：

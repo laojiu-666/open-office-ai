@@ -113,10 +113,22 @@ export async function applySlideSpec(spec: SlideSpec): Promise<ApplySlideSpecRes
         }
 
         // 获取布局配置
-        const layoutConfig = DEFAULT_LAYOUTS[spec.layout.template] || DEFAULT_LAYOUTS['title-content'];
+        let layoutTemplate = spec.layout.template;
+        let layoutConfig = DEFAULT_LAYOUTS[layoutTemplate] || DEFAULT_LAYOUTS['title-content'];
+
+        // 自动修正布局：检查是否有不支持的插槽
+        const hasImageBlock = spec.blocks.some(block => block.kind === 'image');
+        const layoutSupportsImage = layoutConfig.slots.some(slot => slot.id === 'image');
+
+        if (hasImageBlock && !layoutSupportsImage) {
+          console.warn(`[applySlideSpec] Layout "${layoutTemplate}" does not support image slot, auto-switching to "title-image"`);
+          layoutTemplate = 'title-image';
+          layoutConfig = DEFAULT_LAYOUTS['title-image'];
+        }
+
         // 始终使用默认布局的 slots（因为 AI 返回的 slots 可能是字符串数组或空数组）
         const slots = layoutConfig.slots;
-        console.log('[applySlideSpec] Using layout:', spec.layout.template, 'slots:', slots);
+        console.log('[applySlideSpec] Using layout:', layoutTemplate, 'slots:', slots);
 
         // 处理每个内容块
         for (const block of spec.blocks) {
@@ -943,9 +955,21 @@ export async function replaceSlideContent(spec: SlideSpec): Promise<ApplySlideSp
         }
 
         // 获取布局配置
-        const layoutConfig = DEFAULT_LAYOUTS[spec.layout.template] || DEFAULT_LAYOUTS['title-content'];
+        let layoutTemplate = spec.layout.template;
+        let layoutConfig = DEFAULT_LAYOUTS[layoutTemplate] || DEFAULT_LAYOUTS['title-content'];
+
+        // 自动修正布局：检查是否有不支持的插槽
+        const hasImageBlock = spec.blocks.some(block => block.kind === 'image');
+        const layoutSupportsImage = layoutConfig.slots.some(slot => slot.id === 'image');
+
+        if (hasImageBlock && !layoutSupportsImage) {
+          console.warn(`[replaceSlideContent] Layout "${layoutTemplate}" does not support image slot, auto-switching to "title-image"`);
+          layoutTemplate = 'title-image';
+          layoutConfig = DEFAULT_LAYOUTS['title-image'];
+        }
+
         const slots = layoutConfig.slots;
-        console.log('[replaceSlideContent] Using layout:', spec.layout.template, 'slots:', slots);
+        console.log('[replaceSlideContent] Using layout:', layoutTemplate, 'slots:', slots);
 
         // 处理每个内容块
         for (const block of spec.blocks) {
@@ -1129,7 +1153,7 @@ export async function updateSlideElement(
 
         // 查找目标形状
         let targetShape: PowerPoint.Shape | null = null;
-        let targetBounds: Bounds;
+        let targetBounds: Bounds = { x: 50, y: 110, width: 860, height: 380 }; // 默认边界
 
         if (elementType === 'title') {
           // 标题：选择最上面的文本形状
